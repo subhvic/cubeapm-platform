@@ -6,7 +6,7 @@ export default function LoginPage({ onSignIn }) {
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [firstTime, setFirstTime] = useState(false)
+  const [firstTime, setFirstTime] = useState(true)
 
   const submit = (e) => {
     e.preventDefault()

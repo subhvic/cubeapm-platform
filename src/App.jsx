@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import HomeSkeleton from '@/pages/HomeSkeleton'
 import Walkthrough from '@/components/Walkthrough'
 import Sidebar from '@/components/layout/Sidebar'
@@ -26,6 +27,9 @@ function getInfraNavItems() {
 const INFRA_NAV_ITEMS = getInfraNavItems()
 
 export default function App() {
+  const navigate = useNavigate()
+  const location = useLocation()
+
   const [loggedIn, setLoggedIn] = useState(() => {
     try {
       return localStorage.getItem('cubeapm-auth') === 'true'
@@ -35,7 +39,13 @@ export default function App() {
   })
   const [loadingIn, setLoadingIn] = useState(false)
   const [walkthroughOpen, setWalkthroughOpen] = useState(false)
-  const [view, setView] = useState('home')
+  const [view, setView] = useState(() => {
+    const path = location.pathname
+    if (path === '/logs') return 'logs'
+    if (path === '/infrastructure') return 'infra'
+    if (path.startsWith('/service/')) return 'service'
+    return 'home'
+  })
   const [serviceId, setServiceId] = useState('payment-service')
   const [navCollapsed, setNavCollapsed] = useState(true)
   const [timeRange, setTimeRange] = useState('Last 1 hour')
@@ -64,6 +74,7 @@ export default function App() {
     setLoadingIn(true)
     setView('home')
     setLoggedIn(true)
+    navigate('/home')
     setTimeout(() => {
       setLoadingIn(false)
       if (firstTime) setWalkthroughOpen(true)
@@ -77,6 +88,24 @@ export default function App() {
       console.error('Failed to save auth state:', e)
     }
   }, [loggedIn])
+
+  useEffect(() => {
+    if (!loggedIn) {
+      navigate('/')
+      return
+    }
+    const path = location.pathname
+    if (path === '/') {
+      navigate('/home')
+    }
+  }, [loggedIn, navigate, location.pathname])
+
+  useEffect(() => {
+    if (view === 'home') navigate('/home')
+    else if (view === 'logs') navigate('/logs')
+    else if (view === 'infra') navigate('/infrastructure')
+    else if (view === 'service' && serviceId) navigate(`/service/${serviceId}`)
+  }, [view, serviceId, navigate])
 
   if (!loggedIn) {
     return <LoginPage onSignIn={signIn} />
