@@ -25,7 +25,7 @@ function SvgIcon({ name, className, style }) {
   )
 }
 
-export default function Header({ view, serviceId, timeRange, setTimeRange, settingsOpen, setSettingsOpen, selectService, onLogout }) {
+export default function Header({ view, serviceId, timeRange, setTimeRange, settingsOpen, setSettingsOpen, selectService, onLogout, onOpenHelp }) {
   const [profileOpen, setProfileOpen] = useState(false)
   const [timeOpen, setTimeOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -162,7 +162,7 @@ export default function Header({ view, serviceId, timeRange, setTimeRange, setti
           </button>
         )}
 
-        <button className="hbtn icon" title="Help" aria-label="Help and documentation"><SvgIcon name="help" /></button>
+        <button className="hbtn icon help-btn" title="Help" aria-label="Help and documentation" onClick={() => onOpenHelp?.()}><SvgIcon name="help" /></button>
 
         <div style={{ position: 'relative' }}>
           <button className="avatar" onClick={(e) => { e.stopPropagation(); setProfileOpen(o => !o) }} title="Account" aria-label="Account menu">S</button>

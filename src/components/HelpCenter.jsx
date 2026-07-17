@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 
 const HELP_TOPICS = [
   {
@@ -52,6 +52,12 @@ const HELP_TOPICS = [
 
 export default function HelpCenter({ onClose }) {
   const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const filteredTopics = useMemo(() => {
     if (!searchQuery.trim()) return HELP_TOPICS
