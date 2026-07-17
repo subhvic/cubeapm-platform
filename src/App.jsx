@@ -1,0 +1,497 @@
+import { useState, useCallback, useRef, useEffect } from 'react'
+import HomeSkeleton from '@/pages/HomeSkeleton'
+import Walkthrough from '@/components/Walkthrough'
+import Sidebar from '@/components/layout/Sidebar'
+import InfraIcon from '@/components/layout/InfraIcons'
+import Header from '@/components/layout/Header'
+import HomePage from '@/pages/HomePage'
+import ServiceOverview from '@/pages/ServiceOverview'
+import LogsView from '@/pages/LogsView'
+import InfraView from '@/pages/InfraView'
+import LoginPage from '@/pages/LoginPage'
+import { services, redEndpoints } from '@/data/services'
+import { INFRA_SOURCES, infraHosts } from '@/data/observability'
+
+function getInfraNavItems() {
+  const items = []
+  INFRA_SOURCES.forEach(s => {
+    if (s.group) {
+      s.children.forEach(c => items.push({ id: c.id, label: `${s.label} ${c.label}` }))
+    } else {
+      items.push({ id: s.id, label: s.label })
+    }
+  })
+  return items
+}
+const INFRA_NAV_ITEMS = getInfraNavItems()
+
+export default function App() {
+  const [loggedIn, setLoggedIn] = useState(() => {
+    try {
+      return localStorage.getItem('cubeapm-auth') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [loadingIn, setLoadingIn] = useState(false)
+  const [walkthroughOpen, setWalkthroughOpen] = useState(false)
+  const [view, setView] = useState('home')
+  const [serviceId, setServiceId] = useState('payment-service')
+  const [navCollapsed, setNavCollapsed] = useState(true)
+  const [timeRange, setTimeRange] = useState('Last 1 hour')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState(null)
+  const [serviceSubTab, setServiceSubTab] = useState('overview')
+  const [infraSource, setInfraSource] = useState('host')
+  const [infraHost, setInfraHost] = useState(null)
+  const [infraExpanded, setInfraExpanded] = useState({})
+  const [hiddenNavItems, setHiddenNavItems] = useState(() => new Set())
+
+  const selectService = useCallback((id) => {
+    setServiceId(id)
+    setView('service')
+    setSettingsOpen(false)
+    setSettingsTab(null)
+  }, [])
+
+  const goHome = useCallback(() => {
+    setView('home')
+    setSettingsOpen(false)
+    setSettingsTab(null)
+  }, [])
+
+  const signIn = (firstTime) => {
+    setLoadingIn(true)
+    setView('home')
+    setLoggedIn(true)
+    setTimeout(() => {
+      setLoadingIn(false)
+      if (firstTime) setWalkthroughOpen(true)
+    }, 2000)
+  }
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cubeapm-auth', loggedIn ? 'true' : 'false')
+    } catch (e) {
+      console.error('Failed to save auth state:', e)
+    }
+  }, [loggedIn])
+
+  if (!loggedIn) {
+    return <LoginPage onSignIn={signIn} />
+  }
+
+  const isService = view === 'service'
+  const isLogs = view === 'logs'
+  const isInfra = view === 'infra'
+
+  return (
+    <div className={`app${navCollapsed ? ' nav-collapsed' : ''}`}>
+      <Sidebar
+        navCollapsed={navCollapsed}
+        setNavCollapsed={setNavCollapsed}
+        view={view}
+        goHome={goHome}
+        setView={setView}
+      />
+      <div className="main">
+        <Header
+          view={view}
+          serviceId={serviceId}
+          timeRange={timeRange}
+          setTimeRange={setTimeRange}
+          settingsOpen={settingsOpen}
+          setSettingsOpen={setSettingsOpen}
+          selectService={selectService}
+          onLogout={() => setLoggedIn(false)}
+        />
+        <div className={`surface-card${isService || isInfra ? ' svc-view' : ''}`}>
+          {isService && (
+            <div className="svc-sidebar">
+              {services.map(s => (
+                <div
+                  key={s.id}
+                  className={`svc-sidebar-item${s.id === serviceId ? ' active' : ''}`}
+                  onClick={() => selectService(s.id)}
+                >
+                  <span className={`status-dot ${s.status}`} title={`Status: ${s.status}`} />
+                  <span className="svc-sidebar-name mono">{s.name}</span>
+                  {s.status !== 'healthy' && (
+                    <span className={`svc-sidebar-badge ${s.status}`}>
+                      {s.status === 'critical' ? 'crit' : 'warn'}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {isInfra && (
+            <div className="svc-sidebar">
+              <div className="svc-sidebar-label">Sources</div>
+              {INFRA_SOURCES.map(s => {
+                if (s.group) {
+                  const open = !!infraExpanded[s.id]
+                  return (
+                    <div key={s.id}>
+                      <div
+                        className="svc-sidebar-item group-head"
+                        onClick={() => setInfraExpanded(e => ({ ...e, [s.id]: !e[s.id] }))}
+                      >
+                        <InfraIcon id={s.id} />
+                        <span className="svc-sidebar-name">{s.label}</span>
+                        <svg className={`svc-sidebar-group-chev${open ? ' open' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+                      </div>
+                      {open && (
+                        <div className="svc-sidebar-children">
+                          {s.children.filter(c => !hiddenNavItems.has(c.id)).map(c => (
+                            <div
+                              key={c.id}
+                              className={`svc-sidebar-item svc-sidebar-child${infraSource === c.id ? ' active' : ''}`}
+                              onClick={() => { setInfraSource(c.id); setInfraHost(null) }}
+                            >
+                              <span className="svc-sidebar-name">{c.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+                if (hiddenNavItems.has(s.id)) return null
+                const isActive = infraSource === s.id
+                const count = s.id === 'host' ? infraHosts.length : s.count
+                return (
+                  <div
+                    key={s.id}
+                    className={`svc-sidebar-item${isActive ? ' active' : ''}${s.enabled ? '' : ' disabled'}`}
+                    onClick={s.enabled ? () => { setInfraSource(s.id); setInfraHost(null) } : undefined}
+                    title={s.enabled ? s.label : `${s.label} - no data connected yet`}
+                  >
+                    <InfraIcon id={s.id} />
+                    <span className="svc-sidebar-name">{s.label}</span>
+                    {s.enabled && count != null && <span className="svc-sidebar-count">{count}</span>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div className="card-scroll">
+            {isService ? (
+              <ServiceOverview
+                serviceId={serviceId}
+                goHome={goHome}
+                serviceSubTab={serviceSubTab}
+                setServiceSubTab={setServiceSubTab}
+                settingsOpen={settingsOpen}
+                setSettingsOpen={setSettingsOpen}
+                settingsTab={settingsTab}
+                setSettingsTab={setSettingsTab}
+              />
+            ) : isLogs ? (
+              <LogsView goHome={goHome} />
+            ) : isInfra ? (
+              <InfraView key={infraSource} goHome={goHome} source={infraSource} selectedHost={infraHost} setSelectedHost={setInfraHost} />
+            ) : loadingIn ? (
+              <HomeSkeleton />
+            ) : (
+              <HomePage selectService={selectService} />
+            )}
+          </div>
+        </div>
+      </div>
+      {settingsOpen && (
+        <>
+          <div className="settings-backdrop open" onClick={() => { setSettingsOpen(false); setSettingsTab(null) }} />
+          <SettingsDrawer
+            view={view}
+            serviceSubTab={serviceSubTab}
+            serviceId={serviceId}
+            settingsTab={settingsTab}
+            setSettingsTab={setSettingsTab}
+            onClose={() => { setSettingsOpen(false); setSettingsTab(null) }}
+            timeRange={timeRange}
+            hiddenNavItems={hiddenNavItems}
+            setHiddenNavItems={setHiddenNavItems}
+          />
+        </>
+      )}
+      {walkthroughOpen && <Walkthrough onFinish={() => setWalkthroughOpen(false)} />}
+    </div>
+  )
+}
+
+const TIME_PRESETS = ['Last 5 minutes','Last 15 minutes','Last 30 minutes','Last 1 hour','Last 2 hours','Last 3 hours','Last 6 hours','Last 12 hours','Last 24 hours','Last 2 days','Last 3 days','Last 7 days','Today','Today so far']
+
+function SettingsDrawer({ view, serviceSubTab, serviceId, settingsTab, setSettingsTab, onClose, timeRange, hiddenNavItems, setHiddenNavItems }) {
+  const isInfra = view === 'infra'
+
+  const tabs = view === 'home'
+    ? ['General', 'Notifications']
+    : serviceSubTab === 'red'
+      ? ['Display', 'Thresholds']
+      : ['Apdex', 'Thresholds', 'Alerts']
+
+  const activeTab = settingsTab && tabs.includes(settingsTab) ? settingsTab : tabs[0]
+
+  useEffect(() => {
+    if (isInfra) return
+    if (!settingsTab || !tabs.includes(settingsTab)) {
+      setSettingsTab(tabs[0])
+    }
+  }, [view, serviceSubTab])
+
+  const svc = services.find(s => s.id === serviceId)
+
+  return (
+    <div className="settings-drawer open">
+      <div className="drawer-header">
+        <button className="drawer-close" onClick={onClose} aria-label="Close settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+        </button>
+        <span className="drawer-title">Settings</span>
+        {isInfra && <button className="drawer-done" onClick={onClose}>Done</button>}
+      </div>
+      {!isInfra && (
+        <div className="drawer-tabs">
+          {tabs.map(t => (
+            <div key={t} className={`drawer-tab${t === activeTab ? ' active' : ''}`} onClick={() => setSettingsTab(t)}>{t}</div>
+          ))}
+        </div>
+      )}
+      <div className="drawer-body">
+        {isInfra ? (
+          <InfraNavSettings hiddenNavItems={hiddenNavItems} setHiddenNavItems={setHiddenNavItems} />
+        ) : (
+          <SettingsBody tab={activeTab} view={view} serviceSubTab={serviceSubTab} svc={svc} timeRange={timeRange} redEndpoints={redEndpoints} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function InfraNavSettings({ hiddenNavItems, setHiddenNavItems }) {
+  const [search, setSearch] = useState('')
+  const filtered = search
+    ? INFRA_NAV_ITEMS.filter(i => i.label.toLowerCase().includes(search.toLowerCase()))
+    : INFRA_NAV_ITEMS
+
+  const toggle = (id) => {
+    setHiddenNavItems(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <>
+      <p className="drawer-description">Select the components you want to see in the navigation list.</p>
+      <div className="drawer-links">
+        <a onClick={() => setHiddenNavItems(new Set())}>Show All</a>
+        <span>|</span>
+        <a onClick={() => setHiddenNavItems(new Set(INFRA_NAV_ITEMS.map(i => i.id)))}>Hide All</a>
+      </div>
+      <div className="drawer-nav-search">
+        <input placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+      <div className="drawer-nav-list">
+        {filtered.map(i => (
+          <label key={i.id} className="drawer-nav-item">
+            <input type="checkbox" checked={!hiddenNavItems.has(i.id)} onChange={() => toggle(i.id)} />
+            <span>{i.label}</span>
+          </label>
+        ))}
+        {filtered.length === 0 && <div className="drawer-nav-empty">No components match "{search}"</div>}
+      </div>
+    </>
+  )
+}
+
+function SettingsBody({ tab, view, serviceSubTab, svc, timeRange, redEndpoints }) {
+  if (view === 'home') {
+    if (tab === 'General') return (
+      <>
+        <p className="drawer-description">Configure display and refresh preferences for the Home view.</p>
+        <div className="drawer-section">
+          <div className="drawer-section-label">Auto-refresh interval</div>
+          <div className="drawer-row">
+            <select className="drawer-select" defaultValue="1 minute">
+              <option>Off</option><option>30 seconds</option><option>1 minute</option><option>5 minutes</option>
+            </select>
+            <button className="drawer-save">Save</button>
+          </div>
+        </div>
+        <div className="drawer-section">
+          <div className="drawer-section-label">Default time range</div>
+          <div className="drawer-row">
+            <select className="drawer-select" defaultValue={timeRange}>
+              {['Last 5 minutes','Last 15 minutes','Last 30 minutes','Last 1 hour','Last 2 hours','Last 3 hours','Last 6 hours','Last 12 hours','Last 24 hours','Last 2 days','Last 3 days','Last 7 days','Today','Today so far'].map(p => (
+                <option key={p}>{p}</option>
+              ))}
+            </select>
+            <button className="drawer-save">Save</button>
+          </div>
+        </div>
+        <div className="drawer-section">
+          <div className="drawer-section-label">Services per page</div>
+          <div className="drawer-row">
+            <div className="drawer-input-wrap"><input type="number" defaultValue={50} /><span className="drawer-suffix">rows</span></div>
+            <button className="drawer-save">Save</button>
+          </div>
+        </div>
+      </>
+    )
+    if (tab === 'Notifications') return (
+      <>
+        <p className="drawer-description">Control where CubeAPM sends alert notifications. Webhook and PagerDuty settings apply globally.</p>
+        <div className="drawer-section">
+          <div className="drawer-section-label">Webhook URL</div>
+          <div className="drawer-row">
+            <div className="drawer-input-wrap" style={{ flex: 1 }}><input type="url" placeholder="https://hooks.example.com/…" style={{ width: '100%', fontFamily: "'JetBrains Mono',monospace", fontSize: '10.5px' }} /></div>
+            <button className="drawer-save">Save</button>
+          </div>
+        </div>
+        <div className="drawer-section">
+          <div className="drawer-section-label">Notify on</div>
+          <div className="drawer-row">
+            <select className="drawer-select"><option>All status changes</option><option>Critical only</option><option>Warning + Critical</option></select>
+            <button className="drawer-save">Save</button>
+          </div>
+        </div>
+        <div className="drawer-section">
+          <div className="drawer-section-label">Suppression window</div>
+          <div className="drawer-row">
+            <select className="drawer-select"><option>None</option><option>5 minutes</option><option>15 minutes</option><option>1 hour</option></select>
+            <button className="drawer-save">Save</button>
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  if (tab === 'Apdex') return (
+    <>
+      <p className="drawer-description">Thresholds are considered from most specific to least specific - if a threshold is set for a particular endpoint, other values are not considered for that endpoint. Setting a threshold to 0 effectively unsets it. A negative value means "remove from Apdex calculations".</p>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Default Apdex Threshold</div>
+        <div className="drawer-row">
+          <div className="drawer-input-wrap"><input type="number" placeholder="300" /><span className="drawer-suffix">ms</span></div>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Default Apdex Threshold for Env</div>
+        <select className="drawer-select"><option value="">UNSET</option><option>production</option><option>staging</option><option>development</option></select>
+        <div className="drawer-row">
+          <div className="drawer-input-wrap"><input type="number" placeholder="-" /><span className="drawer-suffix">ms</span></div>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Default Apdex Threshold for Service</div>
+        <select className="drawer-select" defaultValue={svc?.id || ''}>
+          <option value="">Select service</option>
+          {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <div className="drawer-row">
+          <div className="drawer-input-wrap"><input type="number" placeholder="-" /><span className="drawer-suffix">ms</span></div>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Apdex Threshold for Endpoint</div>
+        <select className="drawer-select">
+          <option value="">Select endpoint</option>
+          {redEndpoints.map(e => <option key={e.endpoint}>{e.endpoint}</option>)}
+        </select>
+        <div className="drawer-row">
+          <div className="drawer-input-wrap"><input type="number" placeholder="-" /><span className="drawer-suffix">ms</span></div>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+    </>
+  )
+
+  if (tab === 'Thresholds') {
+    const isRed = serviceSubTab === 'red'
+    const desc = isRed
+      ? <>Per-service RED metric threshold overrides. These supersede the global defaults set in Overview → Thresholds.</>
+      : <>Override latency and error rate thresholds for <strong style={{ color: 'var(--text-primary)', fontFamily: "'JetBrains Mono',monospace" }}>{svc?.name}</strong>. These values drive KPI card coloring and alert state.</>
+    const fields = isRed
+      ? [['Response time - Warning', 150, 'ms'], ['Response time - Critical', 300, 'ms'], ['Error rate - Warning', 1, '%'], ['Error rate - Critical', 3, '%']]
+      : [['p90 Latency - Warning', 150, 'ms'], ['p90 Latency - Critical', 300, 'ms'], ['Error Rate - Warning', 1, '%'], ['Error Rate - Critical', 3, '%']]
+    return (
+      <>
+        <p className="drawer-description">{desc}</p>
+        {fields.map(([label, val, suffix]) => (
+          <div className="drawer-section" key={label}>
+            <div className="drawer-section-label">{label}</div>
+            <div className="drawer-row">
+              <div className="drawer-input-wrap"><input type="number" defaultValue={val} /><span className="drawer-suffix">{suffix}</span></div>
+              <button className="drawer-save">Save</button>
+            </div>
+          </div>
+        ))}
+      </>
+    )
+  }
+
+  if (tab === 'Alerts') return (
+    <>
+      <p className="drawer-description">Configure alert rules scoped to <strong style={{ color: 'var(--text-primary)', fontFamily: "'JetBrains Mono',monospace" }}>{svc?.name}</strong>. Alert state is derived from threshold breaches configured in the Thresholds tab.</p>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Alert channel</div>
+        <div className="drawer-row">
+          <select className="drawer-select"><option>Email</option><option>Webhook</option><option>PagerDuty</option><option>Slack</option></select>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Suppression window</div>
+        <div className="drawer-row">
+          <select className="drawer-select"><option>None</option><option>5 minutes</option><option>15 minutes</option><option>1 hour</option></select>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Auto-resolve after</div>
+        <div className="drawer-row">
+          <select className="drawer-select"><option>Never</option><option>10 minutes</option><option>30 minutes</option><option>1 hour</option></select>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+    </>
+  )
+
+  if (tab === 'Display') return (
+    <>
+      <p className="drawer-description">Set default display preferences for the RED tab on <strong style={{ color: 'var(--text-primary)', fontFamily: "'JetBrains Mono',monospace" }}>{svc?.name}</strong>.</p>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Default view</div>
+        <div className="drawer-row">
+          <select className="drawer-select"><option>Table</option><option>Graph</option></select>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+      <div className="drawer-section">
+        <div className="drawer-section-label">Max endpoints shown</div>
+        <div className="drawer-row">
+          <div className="drawer-input-wrap"><input type="number" defaultValue={10} /><span className="drawer-suffix">rows</span></div>
+          <button className="drawer-save">Save</button>
+        </div>
+      </div>
+    </>
+  )
+
+  return (
+    <div className="drawer-empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" width="22" height="22">
+        <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+      <div className="drawer-empty-title">No settings here yet</div>
+      <div className="drawer-empty-sub">Settings for this tab will appear in a future update.</div>
+    </div>
+  )
+}
