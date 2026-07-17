@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import HelpCenter from './HelpCenter'
 
 const STEPS = [
   {
@@ -40,6 +41,12 @@ const STEPS = [
     desc: 'The service list always sorts by severity, never alphabetically. Incidents lead so you can act instead of scroll.',
     placement: 'top',
     pad: 8,
+  },
+  {
+    isHelp: true,
+    badge: 'Help Center',
+    title: 'Explore our Help Center',
+    desc: 'Get answers to common questions, learn about each feature, and find detailed guides. Search topics or browse by category.',
   },
 ]
 
@@ -93,11 +100,15 @@ export default function Walkthrough({ onFinish }) {
   const [step, setStep] = useState(0)
   const [pos, setPos] = useState(null)
   const [rect, setRect] = useState(null)
+  const [showHelp, setShowHelp] = useState(false)
   const tooltipRef = useRef(null)
 
   const cfg = STEPS[step]
+  const isHelpStep = cfg?.isHelp
 
   useLayoutEffect(() => {
+    if (isHelpStep) return
+
     const measure = () => {
       const el = document.querySelector(cfg.target)
       if (!el) { setRect(null); return }
@@ -110,27 +121,44 @@ export default function Walkthrough({ onFinish }) {
     measure()
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
-  }, [step, cfg.target, cfg.placement, cfg.pad])
+  }, [step, cfg.target, cfg.placement, cfg.pad, isHelpStep])
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') onFinish?.()
-      if (e.key === 'ArrowRight' || e.key === 'Enter') {
-        if (step < STEPS.length - 1) setStep(s => s + 1)
+      if (e.key === 'Escape') {
+        if (showHelp) setShowHelp(false)
         else onFinish?.()
       }
-      if (e.key === 'ArrowLeft' && step > 0) setStep(s => s - 1)
+      if (!isHelpStep && !showHelp) {
+        if (e.key === 'ArrowRight' || e.key === 'Enter') {
+          if (step < STEPS.length - 1) setStep(s => s + 1)
+          else onFinish?.()
+        }
+        if (e.key === 'ArrowLeft' && step > 0) setStep(s => s - 1)
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [step, onFinish])
+  }, [step, onFinish, isHelpStep, showHelp])
 
   const isLast = step === STEPS.length - 1
+
+  const handleHelpNext = () => {
+    setShowHelp(true)
+  }
+
+  const handleHelpClose = () => {
+    onFinish?.()
+  }
+
+  if (showHelp) {
+    return <HelpCenter onClose={handleHelpClose} />
+  }
 
   return (
     <div className="wt-overlay" role="dialog" aria-label="Platform walkthrough">
       <div className="wt-mask" onClick={onFinish} />
-      {rect && (
+      {!isHelpStep && rect && (
         <div
           className="wt-spotlight"
           style={{
@@ -141,7 +169,7 @@ export default function Walkthrough({ onFinish }) {
           }}
         />
       )}
-      {pos && (
+      {!isHelpStep && pos && (
         <div
           ref={tooltipRef}
           className="wt-tooltip"
@@ -171,6 +199,31 @@ export default function Walkthrough({ onFinish }) {
                 {!isLast && (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isHelpStep && (
+        <div className="wt-help-card">
+          <div className="wt-help-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 10, height: 10 }}><path d="M12 2l1.6 5.4L19 9l-5.4 1.6L12 16l-1.6-5.4L5 9l5.4-1.6z"/></svg>
+            {cfg.badge}
+          </div>
+          <div className="wt-help-title">{cfg.title}</div>
+          <div className="wt-help-desc">{cfg.desc}</div>
+          <div className="wt-progress">
+            {STEPS.map((_, i) => (
+              <span key={i} className={`wt-progress-dot${i < step ? ' done' : i === step ? ' active' : ''}`} />
+            ))}
+          </div>
+          <div className="wt-actions">
+            <button className="wt-skip" onClick={onFinish}>Skip</button>
+            <div className="wt-nav">
+              <button className="wt-btn secondary" onClick={() => setStep(s => s - 1)}>Back</button>
+              <button className="wt-btn primary" onClick={handleHelpNext}>
+                Open Help Center
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
               </button>
             </div>
           </div>
