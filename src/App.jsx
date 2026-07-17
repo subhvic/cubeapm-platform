@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import HomeSkeleton from '@/pages/HomeSkeleton'
 import Walkthrough from '@/components/Walkthrough'
-import HelpCenter from '@/components/HelpCenter'
+import Toast from '@/components/Toast'
 import Sidebar from '@/components/layout/Sidebar'
 import InfraIcon from '@/components/layout/InfraIcons'
 import Header from '@/components/layout/Header'
@@ -40,7 +40,7 @@ export default function App() {
   })
   const [loadingIn, setLoadingIn] = useState(false)
   const [walkthroughOpen, setWalkthroughOpen] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
+  const [toast, setToast] = useState(null)
   const [view, setView] = useState(() => {
     const path = location.pathname
     if (path === '/logs') return 'logs'
@@ -70,6 +70,10 @@ export default function App() {
     setView('home')
     setSettingsOpen(false)
     setSettingsTab(null)
+  }, [])
+
+  const openHelp = useCallback(() => {
+    setToast('Help Center is not built yet. This was only a preview of the user journey.')
   }, [])
 
   const signIn = (firstTime) => {
@@ -136,7 +140,7 @@ export default function App() {
           setSettingsOpen={setSettingsOpen}
           selectService={selectService}
           onLogout={() => setLoggedIn(false)}
-          onOpenHelp={() => setHelpOpen(true)}
+          onOpenHelp={openHelp}
         />
         <div className={`surface-card${isService || isInfra ? ' svc-view' : ''}`}>
           {isService && (
@@ -251,10 +255,10 @@ export default function App() {
       {walkthroughOpen && (
         <Walkthrough
           onFinish={() => setWalkthroughOpen(false)}
-          onOpenHelp={() => setHelpOpen(true)}
+          onOpenHelp={openHelp}
         />
       )}
-      {helpOpen && <HelpCenter onClose={() => setHelpOpen(false)} />}
+      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
     </div>
   )
 }
