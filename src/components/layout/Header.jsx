@@ -25,7 +25,7 @@ function SvgIcon({ name, className, style }) {
   )
 }
 
-export default function Header({ view, serviceId, timeRange, setTimeRange, settingsOpen, setSettingsOpen, selectService, onLogout, onOpenHelp }) {
+export default function Header({ view, serviceId, timeRange, setTimeRange, settingsOpen, setSettingsOpen, selectService, onLogout, onOpenHelp, theme, setTheme }) {
   const [profileOpen, setProfileOpen] = useState(false)
   const [timeOpen, setTimeOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -175,7 +175,16 @@ export default function Header({ view, serviceId, timeRange, setTimeRange, setti
               <div className="pop-sec">
                 <div className="pop-sec-lbl">Settings</div>
                 <div className="pop-item">User preferences</div>
-                <div className="pop-item">Theme <span className="theme-seg"><span>Light</span><span className="on">Dark</span><span>Auto</span></span></div>
+                <div className="pop-item">Theme <span className="theme-seg">
+                  {['light', 'dark', 'auto'].map(t => (
+                    <span
+                      key={t}
+                      className={theme === t ? 'on' : ''}
+                      onClick={() => setTheme?.(t)}
+                      style={{ cursor: 'pointer', textTransform: 'capitalize' }}
+                    >{t}</span>
+                  ))}
+                </span></div>
               </div>
               <div className="pop-sec">
                 <div className="pop-sec-lbl">Manage</div>

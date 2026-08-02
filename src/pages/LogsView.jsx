@@ -8,12 +8,12 @@ function VolumeTooltip({ active, payload, label }) {
   const rec = payload[0]?.payload
   if (!rec) return null
   return (
-    <div style={{ background: '#1E2431', border: '1px solid #2A3346', borderRadius: 6, padding: '6px 10px', fontSize: 11, minWidth: 130 }}>
-      <div style={{ color: '#F1F3F9', fontWeight: 600, marginBottom: 4 }}>{label}</div>
+    <div style={{ background: 'var(--raised)', border: '1px solid var(--border-panel)', borderRadius: 6, padding: '6px 10px', fontSize: 11, minWidth: 130 }}>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 4 }}>{label}</div>
       <div style={{ color: '#EF4444', display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>error</span><span style={{ fontWeight: 600 }}>{rec.error}</span></div>
       <div style={{ color: '#F59E0B', display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>warn</span><span style={{ fontWeight: 600 }}>{rec.warn}</span></div>
       <div style={{ color: '#60A5FA', display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>info</span><span style={{ fontWeight: 600 }}>{rec.info}</span></div>
-      <div style={{ borderTop: '1px solid #2A3346', marginTop: 5, paddingTop: 5, color: '#F1F3F9', fontWeight: 600, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+      <div style={{ borderTop: '1px solid var(--border-panel)', marginTop: 5, paddingTop: 5, color: 'var(--text-primary)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
         <span>total</span><span>{rec.total}</span>
       </div>
     </div>
@@ -126,9 +126,9 @@ export default function LogsView({ goHome }) {
           <div className="logs-volume-chart">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={logVolume} margin={{ top: 8, right: 6, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(logVolume.length / 6)} minTickGap={20} />
-                <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={34} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(logVolume.length / 6)} minTickGap={20} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={34} />
                 <Tooltip content={<VolumeTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
                 <Bar dataKey="info" stackId="v" fill="#60A5FA" fillOpacity={0.55} />
                 <Bar dataKey="warn" stackId="v" fill="#F59E0B" fillOpacity={0.75} />

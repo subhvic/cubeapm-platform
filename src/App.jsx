@@ -11,8 +11,10 @@ import ServiceOverview from '@/pages/ServiceOverview'
 import LogsView from '@/pages/LogsView'
 import InfraView from '@/pages/InfraView'
 import LoginPage from '@/pages/LoginPage'
+import DesignSystemPage from '@/pages/DesignSystemPage'
 import { services, redEndpoints } from '@/data/services'
 import { INFRA_SOURCES, infraHosts } from '@/data/observability'
+import { useTheme } from '@/hooks/useTheme'
 
 function getInfraNavItems() {
   const items = []
@@ -30,6 +32,10 @@ const INFRA_NAV_ITEMS = getInfraNavItems()
 export default function App() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { theme, setTheme } = useTheme()
+
+  // Standalone reference route — always reachable, bypasses auth and the app shell.
+  const isDesignSystem = location.pathname === '/design-system'
 
   const [loggedIn, setLoggedIn] = useState(() => {
     try {
@@ -96,6 +102,7 @@ export default function App() {
   }, [loggedIn])
 
   useEffect(() => {
+    if (isDesignSystem) return
     if (!loggedIn) {
       navigate('/')
       return
@@ -104,14 +111,19 @@ export default function App() {
     if (path === '/') {
       navigate('/home')
     }
-  }, [loggedIn, navigate, location.pathname])
+  }, [loggedIn, navigate, location.pathname, isDesignSystem])
 
   useEffect(() => {
+    if (isDesignSystem) return
     if (view === 'home') navigate('/home')
     else if (view === 'logs') navigate('/logs')
     else if (view === 'infra') navigate('/infrastructure')
     else if (view === 'service' && serviceId) navigate(`/service/${serviceId}`)
-  }, [view, serviceId, navigate])
+  }, [view, serviceId, navigate, isDesignSystem])
+
+  if (isDesignSystem) {
+    return <DesignSystemPage theme={theme} setTheme={setTheme} />
+  }
 
   if (!loggedIn) {
     return <LoginPage onSignIn={signIn} />
@@ -141,6 +153,8 @@ export default function App() {
           selectService={selectService}
           onLogout={() => setLoggedIn(false)}
           onOpenHelp={openHelp}
+          theme={theme}
+          setTheme={setTheme}
         />
         <div className={`surface-card${isService || isInfra ? ' svc-view' : ''}`}>
           {isService && (
