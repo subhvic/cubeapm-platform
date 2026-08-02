@@ -20,9 +20,9 @@ function SvcTooltip({ active, payload, label, color, unit, formatVal }) {
   const raw = payload[0]?.value
   const val = formatVal ? formatVal(raw) : (raw != null ? String(Math.round(raw * 100) / 100) : '')
   return (
-    <div style={{ background: '#1E2431', border: '1px solid #2A3346', borderRadius: 6, padding: '5px 9px', fontSize: 11, lineHeight: '1.5' }}>
-      <div style={{ color: '#F1F3F9', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
-      <div style={{ color: '#616C86', fontSize: 10, marginBottom: 3 }}>{label}</div>
+    <div style={{ background: 'var(--raised)', border: '1px solid var(--border-panel)', borderRadius: 6, padding: '5px 9px', fontSize: 11, lineHeight: '1.5' }}>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 10, marginBottom: 3 }}>{label}</div>
       <div style={{ color, fontWeight: 600 }}>{val}{unit}</div>
     </div>
   )
@@ -33,16 +33,16 @@ function DrilldownTooltip({ active, payload, label }) {
   const exactTime = payload[0]?.payload?.exactTime || ''
   const total = payload.reduce((s, p) => s + (p.value || 0), 0)
   return (
-    <div style={{ background: '#1E2431', border: '1px solid #2A3346', borderRadius: 6, padding: '6px 10px', fontSize: 11, lineHeight: '1.5', minWidth: 200 }}>
-      <div style={{ color: '#F1F3F9', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
-      <div style={{ color: '#616C86', fontSize: 10, marginBottom: 4 }}>{label}</div>
+    <div style={{ background: 'var(--raised)', border: '1px solid var(--border-panel)', borderRadius: 6, padding: '6px 10px', fontSize: 11, lineHeight: '1.5', minWidth: 200 }}>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 10, marginBottom: 4 }}>{label}</div>
       {[...payload].reverse().map(p => (
         <div key={p.dataKey} style={{ color: p.fill, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
           <span style={{ flexShrink: 1 }}>{p.dataKey}</span>
           <span style={{ fontWeight: 600, flexShrink: 0 }}>{Math.round(p.value)} ms</span>
         </div>
       ))}
-      <div style={{ borderTop: '1px solid #2A3346', marginTop: 5, paddingTop: 5, color: '#F1F3F9', fontWeight: 600, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+      <div style={{ borderTop: '1px solid var(--border-panel)', marginTop: 5, paddingTop: 5, color: 'var(--text-primary)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
         <span>Total</span><span>{Math.round(total)} ms</span>
       </div>
     </div>
@@ -53,9 +53,9 @@ function RedChartTooltip({ active, payload, label, eps, colors, fmtFn }) {
   if (!active || !payload?.length) return null
   const exactTime = payload[0]?.payload?.exactTime || ''
   return (
-    <div style={{ background: '#1E2431', border: '1px solid #2A3346', borderRadius: 6, padding: '5px 9px', fontSize: 11, lineHeight: '1.5', minWidth: 180 }}>
-      <div style={{ color: '#F1F3F9', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
-      <div style={{ color: '#616C86', fontSize: 10, marginBottom: 4 }}>{label}</div>
+    <div style={{ background: 'var(--raised)', border: '1px solid var(--border-panel)', borderRadius: 6, padding: '5px 9px', fontSize: 11, lineHeight: '1.5', minWidth: 180 }}>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 10, marginBottom: 4 }}>{label}</div>
       {payload.map((p, i) => {
         const ep = eps[i]?.endpoint || ''
         const short = ep.length > 28 ? ep.slice(0, 26) + '…' : ep
@@ -83,9 +83,9 @@ function SparkChart({ series, color, incidentAt, unit = '', formatVal }) {
               <stop offset="100%" stopColor={color} stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(data.length / 4)} minTickGap={20} />
-          <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={30} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(data.length / 4)} minTickGap={20} />
+          <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={30} />
           <Tooltip content={<SvcTooltip color={color} unit={unit} formatVal={formatVal} />} />
           <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.8} fill={`url(#${gid})`} dot={false} activeDot={{ r: 3 }} />
         </AreaChart>
@@ -158,9 +158,9 @@ function LatencyDrilldown() {
           <div style={{ width: '100%', height: 180 }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={6} minTickGap={30} />
-                <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={32} tickFormatter={v => Math.round(v)} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={6} minTickGap={30} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={32} tickFormatter={v => Math.round(v)} />
                 <Tooltip content={<DrilldownTooltip />} />
                 {layers.map(layer => (
                   <Area key={layer.label} type="monotone" dataKey={layer.label} stackId="stack"
@@ -294,9 +294,9 @@ function RedTab() {
             <div style={{ width: '100%', height: 130 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData2} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={6} minTickGap={20} />
-                  <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={50} tickFormatter={v => fmtFn(v)} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={6} minTickGap={20} />
+                  <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={50} tickFormatter={v => fmtFn(v)} />
                   <Tooltip content={(p) => <RedChartTooltip {...p} eps={eps} colors={EP_COLORS} fmtFn={fmtFn} />} />
                   {eps.map((_, ei) => (
                     <Line key={ei} type="monotone" dataKey={`ep${ei}`} stroke={EP_COLORS[ei]} strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
@@ -396,9 +396,9 @@ function MiniChart({ series, color, unit = '', formatVal, height = 130 }) {
               <stop offset="100%" stopColor={color} stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(data.length / 4)} minTickGap={20} />
-          <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={36} tickFormatter={v => v >= 1000 ? `${+(v / 1000).toFixed(1)}k` : (formatVal ? formatVal(v) : Math.round(v))} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(data.length / 4)} minTickGap={20} />
+          <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={36} tickFormatter={v => v >= 1000 ? `${+(v / 1000).toFixed(1)}k` : (formatVal ? formatVal(v) : Math.round(v))} />
           <Tooltip content={<SvcTooltip color={color} unit={unit} formatVal={formatVal} />} />
           <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.6} fill={`url(#${gid})`} dot={false} activeDot={{ r: 3 }} />
         </AreaChart>
@@ -742,9 +742,9 @@ function RuntimeTab() {
                   <linearGradient id="heapLim" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A78BFA" stopOpacity={0.14} /><stop offset="100%" stopColor="#A78BFA" stopOpacity={0.02} /></linearGradient>
                   <linearGradient id="heapUsed" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3B82F6" stopOpacity={0.3} /><stop offset="100%" stopColor="#3B82F6" stopOpacity={0.02} /></linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(heapStackData.length / 4)} minTickGap={20} />
-                <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={36} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(heapStackData.length / 4)} minTickGap={20} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={36} />
                 <Tooltip content={<DrilldownTooltip />} />
                 <Area type="monotone" dataKey="limit" stroke="#A78BFA" strokeWidth={1.4} fill="url(#heapLim)" dot={false} strokeDasharray="4 3" />
                 <Area type="monotone" dataKey="used" stroke="#3B82F6" strokeWidth={1.6} fill="url(#heapUsed)" dot={false} activeDot={{ r: 3 }} />
@@ -769,9 +769,9 @@ function RuntimeTab() {
                   <linearGradient id="gcMin" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3B82F6" stopOpacity={0.3} /><stop offset="100%" stopColor="#3B82F6" stopOpacity={0.02} /></linearGradient>
                   <linearGradient id="gcMaj" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#F472B6" stopOpacity={0.3} /><stop offset="100%" stopColor="#F472B6" stopOpacity={0.02} /></linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(gcStackData.length / 4)} minTickGap={20} />
-                <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={36} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(gcStackData.length / 4)} minTickGap={20} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={36} />
                 <Tooltip content={<DrilldownTooltip />} />
                 <Area type="monotone" dataKey="minor" stackId="gc" stroke="#3B82F6" strokeWidth={1.4} fill="url(#gcMin)" dot={false} />
                 <Area type="monotone" dataKey="major" stackId="gc" stroke="#F472B6" strokeWidth={1.4} fill="url(#gcMaj)" dot={false} />

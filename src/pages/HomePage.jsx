@@ -20,9 +20,9 @@ function FleetTooltip({ active, payload, label, color, unit, formatVal }) {
   const raw = payload[0]?.value
   const val = formatVal ? formatVal(raw) : raw
   return (
-    <div style={{ background: '#1E2431', border: '1px solid #2A3346', borderRadius: 6, padding: '5px 9px', fontSize: 11, lineHeight: '1.5' }}>
-      <div style={{ color: '#F1F3F9', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
-      <div style={{ color: '#616C86', fontSize: 10, marginBottom: 3 }}>{label}</div>
+    <div style={{ background: 'var(--raised)', border: '1px solid var(--border-panel)', borderRadius: 6, padding: '5px 9px', fontSize: 11, lineHeight: '1.5' }}>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 10, marginBottom: 3 }}>{label}</div>
       <div style={{ color, fontWeight: 600 }}>{val}{unit}</div>
     </div>
   )
@@ -44,9 +44,9 @@ function FleetChart({ title, flag, flagType, value, unit, series, color, inciden
                 <stop offset="100%" stopColor={color} stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(data.length / 4)} minTickGap={20} />
-            <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={30} tickFormatter={v => v >= 1000 ? `${+(v / 1000).toFixed(1)}k` : v} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(data.length / 4)} minTickGap={20} />
+            <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={30} tickFormatter={v => v >= 1000 ? `${+(v / 1000).toFixed(1)}k` : v} />
             <Tooltip content={<FleetTooltip color={color} unit={unit} formatVal={formatVal} />} />
             <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.8} fill={`url(#${gid})`} dot={false} activeDot={{ r: 3 }} />
           </AreaChart>

@@ -47,7 +47,17 @@
       "Bash(sed -i '' \"s/Secondary latency uptick — downstream call to payment-service/Secondary latency uptick - downstream call to payment-service/g\" src/data/services.js)",
       "Bash(sed -i '' \"s/Active Alerts — 2 critical/Active Alerts - 2 critical/\" src/data/services.js)",
       "Bash(sed -i '' \"s/429 Too Many Requests — messages/429 Too Many Requests - messages/\" src/data/observability.js)",
-      "Bash(sed -i '' \"s/DB connection timed out after 3000ms — pool/DB connection timed out after 3000ms - pool/\" src/data/observability.js)"
+      "Bash(sed -i '' \"s/DB connection timed out after 3000ms — pool/DB connection timed out after 3000ms - pool/\" src/data/observability.js)",
+      "Bash(npm run *)",
+      "Bash(awk '{print $2}')",
+      "Bash(grep -rnoE \"\\(stroke|fill|background|color|CartesianGrid|axisLine|tickLine\\)[=:] ?[\\\\\"'{]?[^,;\\)}]*#[0-9A-Fa-f]{6}\" src/pages/HomePage.jsx)",
+      "Bash(perl -pi -e 's/#1E2431/var\\(--raised\\)/g; s/#2A3346/var\\(--border-panel\\)/g; s/#232B3B/var\\(--border-subtle\\)/g; s/#F1F3F9/var\\(--text-primary\\)/g; s/#616C86/var\\(--text-muted\\)/g;' src/pages/HomePage.jsx src/pages/ServiceOverview.jsx src/pages/InfraView.jsx src/pages/LogsView.jsx)",
+      "Bash(awk 'NR>130' src/index.css)",
+      "Bash(sort -t: -k2)",
+      "Bash(awk -F: '{print $2}')",
+      "Bash(echo \"exit: $?\")",
+      "Bash(git checkout *)",
+      "Bash(git add *)"
     ]
   }
 }

@@ -42,9 +42,9 @@ function MultiHostChart({ metric, unit, formatVal, height = 130, palette, hosts 
     <div style={{ width: '100%', height }}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(data.length / 5)} minTickGap={20} />
-          <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={36} tickFormatter={formatVal} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(data.length / 5)} minTickGap={20} />
+          <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={36} tickFormatter={formatVal} />
           <Tooltip content={<MultiTooltip unit={unit} formatVal={formatVal} palette={palette} hosts={hosts} nameKey={nameKey} />} />
           {hosts.map((h, hi) => (
             <Line key={h[nameKey]} type="monotone" dataKey={`h${hi}`} stroke={palette[hi % palette.length]} strokeWidth={1.4} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
@@ -59,9 +59,9 @@ function MultiTooltip({ active, payload, label, unit, formatVal, palette, hosts 
   if (!active || !payload?.length) return null
   const exactTime = payload[0]?.payload?.exactTime || ''
   return (
-    <div style={{ background: '#1E2431', border: '1px solid #2A3346', borderRadius: 6, padding: '6px 10px', fontSize: 11, minWidth: 200 }}>
-      <div style={{ color: '#F1F3F9', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
-      <div style={{ color: '#616C86', fontSize: 10, marginBottom: 4 }}>{label}</div>
+    <div style={{ background: 'var(--raised)', border: '1px solid var(--border-panel)', borderRadius: 6, padding: '6px 10px', fontSize: 11, minWidth: 200 }}>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 10, marginBottom: 4 }}>{label}</div>
       {payload.map((p, i) => (
         <div key={i} style={{ color: palette[i % palette.length], display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 140, whiteSpace: 'nowrap' }}>{hosts[i]?.[nameKey]}</span>
@@ -77,9 +77,9 @@ function SingleAreaTooltip({ active, payload, label, unit, formatVal, color }) {
   const exactTime = payload[0]?.payload?.exactTime || ''
   const raw = payload[0]?.value
   return (
-    <div style={{ background: '#1E2431', border: '1px solid #2A3346', borderRadius: 6, padding: '5px 9px', fontSize: 11 }}>
-      <div style={{ color: '#F1F3F9', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
-      <div style={{ color: '#616C86', fontSize: 10, marginBottom: 3 }}>{label}</div>
+    <div style={{ background: 'var(--raised)', border: '1px solid var(--border-panel)', borderRadius: 6, padding: '5px 9px', fontSize: 11 }}>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 1 }}>{exactTime}</div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 10, marginBottom: 3 }}>{label}</div>
       <div style={{ color, fontWeight: 600 }}>{formatVal ? formatVal(raw) : Math.round(raw)}{unit}</div>
     </div>
   )
@@ -100,9 +100,9 @@ function HostChart({ title, series, color, unit, formatVal, value, height = 130 
                 <stop offset="100%" stopColor={color} stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(data.length / 5)} minTickGap={20} />
-            <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={36} tickFormatter={v => v >= 1000 ? `${+(v / 1000).toFixed(1)}k` : formatVal ? formatVal(v) : Math.round(v)} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(data.length / 5)} minTickGap={20} />
+            <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={36} tickFormatter={v => v >= 1000 ? `${+(v / 1000).toFixed(1)}k` : formatVal ? formatVal(v) : Math.round(v)} />
             <Tooltip content={<SingleAreaTooltip color={color} unit={unit} formatVal={formatVal} />} />
             <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.6} fill={`url(#${gid})`} dot={false} activeDot={{ r: 3 }} />
           </AreaChart>
@@ -151,9 +151,9 @@ function OneMetricChart({ title, series, color, height = 160, unit = '', formatV
                     <stop offset="100%" stopColor={color} stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={11} minTickGap={20} />
-                <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={44} tickFormatter={formatVal} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={11} minTickGap={20} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={44} tickFormatter={formatVal} />
                 <Tooltip content={<SingleAreaTooltip color={color} unit={unit} formatVal={formatVal} />} />
                 <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.6} fill={`url(#om_${title.replace(/\W/g, '')})`} dot={false} activeDot={{ r: 3 }} />
               </AreaChart>
@@ -194,9 +194,9 @@ function HostDetail({ host }) {
                         <stop offset="100%" stopColor="#F59E0B" stopOpacity={0.02} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(60 / 5)} minTickGap={20} />
-                    <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={36} tickFormatter={v => Math.round(v)} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(60 / 5)} minTickGap={20} />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={36} tickFormatter={v => Math.round(v)} />
                     <Tooltip content={<SingleAreaTooltip color="#F59E0B" unit="%" formatVal={v => v.toFixed(1)} />} />
                     <Area type="monotone" dataKey="value" stroke="#F59E0B" strokeWidth={1.6} fill="url(#cpuFill)" dot={false} activeDot={{ r: 3 }} />
                   </AreaChart>
@@ -220,9 +220,9 @@ function HostDetail({ host }) {
                         <stop offset="100%" stopColor="#EF4444" stopOpacity={0.02} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={Math.floor(60 / 5)} minTickGap={20} />
-                    <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={36} tickFormatter={v => Math.round(v)} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(60 / 5)} minTickGap={20} />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={36} tickFormatter={v => Math.round(v)} />
                     <Tooltip content={<SingleAreaTooltip color="#EF4444" unit="%" formatVal={v => v.toFixed(1)} />} />
                     <Area type="monotone" dataKey="value" stroke="#EF4444" strokeWidth={1.6} fill="url(#memFill)" dot={false} activeDot={{ r: 3 }} />
                   </AreaChart>
@@ -281,9 +281,9 @@ function K8sClusterView() {
           <div style={{ height: 130 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={cpuData} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={11} minTickGap={20} />
-                <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={30} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={11} minTickGap={20} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={30} />
                 <Tooltip content={<SingleAreaTooltip color="#34D399" unit=" cores" formatVal={v => v.toFixed(2)} />} />
                 <Line type="monotone" dataKey="total" stroke="#34D399" strokeWidth={1.4} strokeDasharray="4 3" dot={false} />
                 <Line type="monotone" dataKey="request" stroke="#F59E0B" strokeWidth={1.4} dot={false} />
@@ -304,9 +304,9 @@ function K8sClusterView() {
           <div style={{ height: 130 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={memData} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={11} minTickGap={20} />
-                <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={36} tickFormatter={fmtBytes} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={11} minTickGap={20} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={36} tickFormatter={fmtBytes} />
                 <Tooltip content={<SingleAreaTooltip color="#34D399" unit="" formatVal={fmtBytes} />} />
                 <Line type="monotone" dataKey="total" stroke="#34D399" strokeWidth={1.4} strokeDasharray="4 3" dot={false} />
                 <Line type="monotone" dataKey="used" stroke="#3B82F6" strokeWidth={1.6} dot={false} />
@@ -327,9 +327,9 @@ function K8sClusterView() {
           <div style={{ height: 130 }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={containersData} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={11} minTickGap={20} />
-                <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={24} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={11} minTickGap={20} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={24} />
                 <Tooltip content={<SingleAreaTooltip color="#F59E0B" unit="" formatVal={v => Math.round(v)} />} />
                 <Area type="monotone" dataKey="ready" stackId="c" stroke="#F59E0B" fill="#F59E0B" fillOpacity={0.5} strokeWidth={1.4} dot={false} />
                 <Area type="monotone" dataKey="notReady" stackId="c" stroke="#3B82F6" fill="#3B82F6" fillOpacity={0.5} strokeWidth={1.4} dot={false} />
@@ -406,9 +406,9 @@ function K8sDeploymentView() {
         <div style={{ height: 130 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={toChartData(k8sContainersSeries.notReady)} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={11} minTickGap={20} />
-              <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={24} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={11} minTickGap={20} />
+              <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={24} />
               <Tooltip content={<SingleAreaTooltip color="#EF4444" unit="" formatVal={v => Math.round(v)} />} />
               <Line type="monotone" dataKey="value" stroke="#EF4444" strokeWidth={1.6} dot={false} />
             </LineChart>
@@ -488,9 +488,9 @@ function K8sNodeDetail({ node, onSelectPod }) {
               const base = toChartData(node.netInSeries)
               return base.map((d, i) => ({ ...d, transmit: node.netOutSeries[i]?.value, receive: d.value }))
             }, [node])} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={11} minTickGap={20} />
-              <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={44} tickFormatter={fmtBytes} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={11} minTickGap={20} />
+              <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={44} tickFormatter={fmtBytes} />
               <Tooltip content={<SingleAreaTooltip color="#3B82F6" unit="" formatVal={fmtBytes} />} />
               <Area type="monotone" dataKey="transmit" stackId="n" stroke="#F59E0B" fill="#F59E0B" fillOpacity={0.4} strokeWidth={1.4} dot={false} />
               <Area type="monotone" dataKey="receive" stackId="n" stroke="#3B82F6" fill="#3B82F6" fillOpacity={0.4} strokeWidth={1.4} dot={false} />
@@ -641,10 +641,10 @@ function InfraEmptyView({ label, columns }) {
             <div style={{ height: 130 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={toChartData(Array.from({ length: 60 }, (_, i) => ({ m: 59 - i, value: 0 })))} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#232B3B" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={{ stroke: '#232B3B' }} interval={11} minTickGap={20} />
-                  <YAxis tick={{ fontSize: 10, fill: '#616C86' }} tickLine={false} axisLine={false} width={24} domain={[0, 1]} />
-                  <Line type="monotone" dataKey="value" stroke="#616C86" strokeWidth={1} dot={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={11} minTickGap={20} />
+                  <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={24} domain={[0, 1]} />
+                  <Line type="monotone" dataKey="value" stroke="var(--text-muted)" strokeWidth={1} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
