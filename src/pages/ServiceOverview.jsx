@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { services, paymentServiceSeries, latencyDrilldown, redEndpoints, infraCorrelation, slowRequests, externalEndpoints, dbEndpoints, slowQueries, errorGroups, tracesList, traceDetail, runtimeHosts, runtimeMetrics, FILTER_OPTS } from '@/data/services'
 import { statusForLatency, statusForErrorRate, statusColor } from '@/utils/status'
+import PageBar from '@/components/layout/PageBar'
 
 const BASE_TIME = new Date()
 
@@ -858,7 +859,7 @@ function FilterSelect({ label, value, options, onSelect }) {
   )
 }
 
-export default function ServiceOverview({ serviceId, goHome, serviceSubTab, setServiceSubTab }) {
+export default function ServiceOverview({ serviceId, goHome, serviceSubTab, setServiceSubTab, timeRange, setTimeRange, settingsOpen, setSettingsOpen }) {
   const svc = services.find(s => s.id === serviceId) || services[0]
   const isCrit = svc.status === 'critical'
   const isWarn = svc.status === 'warning'
@@ -910,13 +911,19 @@ export default function ServiceOverview({ serviceId, goHome, serviceSubTab, setS
 
   return (
     <>
-      <div className="card-crumbs">
+      <PageBar
+        timeRange={timeRange}
+        setTimeRange={setTimeRange}
+        showSettings
+        settingsOpen={settingsOpen}
+        setSettingsOpen={setSettingsOpen}
+      >
         <a onClick={goHome}>CubeAPM</a>
         <span className="sep">/</span>
         <a onClick={goHome}>APM &amp; Services</a>
         <span className="sep">/</span>
         <span className="current mono">{svc.name}</span>
-      </div>
+      </PageBar>
       <div className="card-tab-strip">
         <div className="subtab-row">
           <div className="tabbar">

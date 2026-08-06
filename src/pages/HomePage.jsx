@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { services, serviceSummary, serviceEdges, externalDependencies, fleetSeries } from '@/data/services'
 import { statusForLatency, statusForErrorRate, statusColor } from '@/utils/status'
+import PageBar from '@/components/layout/PageBar'
 
 const BASE_TIME = new Date()
 
@@ -240,12 +241,18 @@ function GraphTab() {
   )
 }
 
-export default function HomePage({ selectService }) {
+export default function HomePage({ selectService, timeRange, setTimeRange }) {
   const [homeTab, setHomeTab] = useState('detail')
   const [onboardOpen, setOnboardOpen] = useState(true)
 
   return (
-    <div className="home-scroll">
+    <>
+      <PageBar timeRange={timeRange} setTimeRange={setTimeRange}>
+        <span>CubeAPM</span>
+        <span className="sep">/</span>
+        <span className="current">Home</span>
+      </PageBar>
+      <div className="home-scroll">
       {onboardOpen && <Onboarding onDismiss={() => setOnboardOpen(false)} />}
       <SummaryStrip />
       <div className="charts-row">
@@ -265,6 +272,7 @@ export default function HomePage({ selectService }) {
       {homeTab === 'detail' && <DetailTable onServiceClick={selectService} />}
       {homeTab === 'health' && <HealthTab />}
       {homeTab === 'graph' && <GraphTab />}
-    </div>
+      </div>
+    </>
   )
 }

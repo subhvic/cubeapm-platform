@@ -6,6 +6,7 @@ import {
   k8sNodes, k8sPods, K8S_NAMESPACES,
   mysqlSummary, mysqlSeries, redisSummary, redisSeries,
 } from '@/data/observability'
+import PageBar from '@/components/layout/PageBar'
 
 const BASE_TIME = new Date()
 
@@ -794,7 +795,7 @@ function CrumbSelect({ value, options, onSelect, searchPlaceholder = 'Search…'
   )
 }
 
-export default function InfraView({ goHome, source, selectedHost, setSelectedHost }) {
+export default function InfraView({ goHome, source, selectedHost, setSelectedHost, timeRange, setTimeRange, settingsOpen, setSettingsOpen }) {
   const PALETTE = ['#3B82F6', '#A78BFA', '#F472B6', '#34D399', '#F59E0B', '#60A5FA', '#EC4899']
   const [k8sNode, setK8sNode] = useState(null)
   const [k8sPod, setK8sPod] = useState(null)
@@ -899,7 +900,13 @@ export default function InfraView({ goHome, source, selectedHost, setSelectedHos
 
   return (
     <>
-      <div className="card-crumbs">
+      <PageBar
+        timeRange={timeRange}
+        setTimeRange={setTimeRange}
+        showSettings
+        settingsOpen={settingsOpen}
+        setSettingsOpen={setSettingsOpen}
+      >
         <a onClick={goHome}>CubeAPM</a>
         <span className="sep">/</span>
         {host ? (
@@ -980,7 +987,7 @@ export default function InfraView({ goHome, source, selectedHost, setSelectedHos
             <span className="current">{sourceLabel}</span>
           </>
         )}
-      </div>
+      </PageBar>
       <div className="svc-main">
         {body}
       </div>

@@ -5,7 +5,6 @@ import Walkthrough from '@/components/Walkthrough'
 import Toast from '@/components/Toast'
 import Sidebar from '@/components/layout/Sidebar'
 import InfraIcon from '@/components/layout/InfraIcons'
-import Header from '@/components/layout/Header'
 import HomePage from '@/pages/HomePage'
 import ServiceOverview from '@/pages/ServiceOverview'
 import LogsView from '@/pages/LogsView'
@@ -141,21 +140,12 @@ export default function App() {
         view={view}
         goHome={goHome}
         setView={setView}
+        onOpenHelp={openHelp}
+        onLogout={() => setLoggedIn(false)}
+        theme={theme}
+        setTheme={setTheme}
       />
       <div className="main">
-        <Header
-          view={view}
-          serviceId={serviceId}
-          timeRange={timeRange}
-          setTimeRange={setTimeRange}
-          settingsOpen={settingsOpen}
-          setSettingsOpen={setSettingsOpen}
-          selectService={selectService}
-          onLogout={() => setLoggedIn(false)}
-          onOpenHelp={openHelp}
-          theme={theme}
-          setTheme={setTheme}
-        />
         <div className={`surface-card${isService || isInfra ? ' svc-view' : ''}`}>
           {isService && (
             <div className="svc-sidebar">
@@ -237,15 +227,27 @@ export default function App() {
                 setSettingsOpen={setSettingsOpen}
                 settingsTab={settingsTab}
                 setSettingsTab={setSettingsTab}
+                timeRange={timeRange}
+                setTimeRange={setTimeRange}
               />
             ) : isLogs ? (
-              <LogsView goHome={goHome} />
+              <LogsView goHome={goHome} timeRange={timeRange} setTimeRange={setTimeRange} />
             ) : isInfra ? (
-              <InfraView key={infraSource} goHome={goHome} source={infraSource} selectedHost={infraHost} setSelectedHost={setInfraHost} />
+              <InfraView
+                key={infraSource}
+                goHome={goHome}
+                source={infraSource}
+                selectedHost={infraHost}
+                setSelectedHost={setInfraHost}
+                timeRange={timeRange}
+                setTimeRange={setTimeRange}
+                settingsOpen={settingsOpen}
+                setSettingsOpen={setSettingsOpen}
+              />
             ) : loadingIn ? (
               <HomeSkeleton />
             ) : (
-              <HomePage selectService={selectService} />
+              <HomePage selectService={selectService} timeRange={timeRange} setTimeRange={setTimeRange} />
             )}
           </div>
         </div>

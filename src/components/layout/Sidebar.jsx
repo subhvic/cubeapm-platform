@@ -1,3 +1,5 @@
+import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { LogoIcon, LogoWordmark } from './Logo'
 
 const ICONS = {
@@ -15,6 +17,7 @@ const ICONS = {
   radio: <><circle cx="12" cy="12" r="2.2"/><path d="M7 9a6.5 6.5 0 000 6M17 9a6.5 6.5 0 010 6M4 5a11 11 0 000 14M20 5a11 11 0 010 14"/></>,
   shield: <path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/>,
   sliders: <><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></>,
+  help: <><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></>,
   chevLeft: <path d="M15 18l-6-6 6-6"/>,
   chevRight: <path d="M9 6l6 6-6 6"/>,
 }
@@ -50,8 +53,31 @@ const NAV_GROUPS = [
   ]},
 ]
 
-export default function Sidebar({ navCollapsed, setNavCollapsed, view, goHome, setView }) {
+export default function Sidebar({ navCollapsed, setNavCollapsed, view, goHome, setView, onOpenHelp, onLogout, theme, setTheme }) {
   const activeId = view === 'home' ? 'home' : view === 'logs' ? 'logs' : view === 'infra' ? 'infra' : 'apm'
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [popPos, setPopPos] = useState({ left: 0, bottom: 0 })
+  const btnRef = useRef(null)
+
+  useEffect(() => {
+    if (!profileOpen) return
+    const handler = (e) => {
+      if (!e.target.closest('.nav-profile-btn') && !e.target.closest('.nav-pop')) {
+        setProfileOpen(false)
+      }
+    }
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [profileOpen])
+
+  function openProfile(e) {
+    e.stopPropagation()
+    if (!profileOpen && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPopPos({ left: r.left, bottom: window.innerHeight - r.top + 8 })
+    }
+    setProfileOpen(o => !o)
+  }
 
   return (
     <nav className="nav">
@@ -83,9 +109,66 @@ export default function Sidebar({ navCollapsed, setNavCollapsed, view, goHome, s
         ))}
       </div>
       <div className="nav-bottom">
+        <div className="nav-user-row">
+          <button
+            className="nav-user-btn help-btn"
+            onClick={() => onOpenHelp?.()}
+            title="Help and documentation"
+            aria-label="Help and documentation"
+          >
+            <Icon name="help" />
+            <span className="nav-text">Help</span>
+          </button>
+          <div>
+            <button
+              ref={btnRef}
+              className={`nav-user-btn nav-profile-btn${profileOpen ? ' active' : ''}`}
+              onClick={openProfile}
+              title="Account"
+              aria-label="Account menu"
+            >
+              <span className="nav-avatar">S</span>
+              <span className="nav-text">Account</span>
+            </button>
+            {profileOpen && createPortal(
+              <div
+                className="pop nav-pop"
+                style={{ position: 'fixed', left: popPos.left, bottom: popPos.bottom, top: 'auto', right: 'auto' }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="pop-head">
+                  <div className="pop-name">CubeAPM <span className="pop-plan">Full platform</span></div>
+                  <div className="pop-email">tech@cubeapm.com</div>
+                </div>
+                <div className="pop-sec">
+                  <div className="pop-sec-lbl">Settings</div>
+                  <div className="pop-item">User preferences</div>
+                  <div className="pop-item">Theme <span className="theme-seg">
+                    {['light', 'dark', 'auto'].map(t => (
+                      <span
+                        key={t}
+                        className={theme === t ? 'on' : ''}
+                        onClick={() => setTheme?.(t)}
+                        style={{ cursor: 'pointer', textTransform: 'capitalize' }}
+                      >{t}</span>
+                    ))}
+                  </span></div>
+                </div>
+                <div className="pop-sec">
+                  <div className="pop-sec-lbl">Manage</div>
+                  <div className="pop-item">Administration</div>
+                  <div className="pop-item">API keys</div>
+                  <div className="pop-item">Manage your plan</div>
+                </div>
+                <div className="pop-sec"><div className="pop-item danger" onClick={() => { setProfileOpen(false); onLogout?.() }}>Log out</div></div>
+              </div>,
+              document.body
+            )}
+          </div>
+        </div>
         <button className="nav-collapse" onClick={() => setNavCollapsed(c => !c)} aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}>
           <Icon name={navCollapsed ? 'chevRight' : 'chevLeft'} />
-          <span className="nav-text">Collapse</span>
+          <span className="nav-text">{navCollapsed ? 'Expand' : 'Collapse'}</span>
         </button>
       </div>
     </nav>
