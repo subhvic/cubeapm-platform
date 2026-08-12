@@ -1,7 +1,8 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { logRows, logVolume, logFacets, logTotals } from '@/data/observability'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, ResponsiveContainer } from 'recharts'
+import { logRows, logVolume, logFacets, logTotals, BASE_TIME } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
+import QueryBuilder, { applyChipsToLog, chipsToString } from '@/components/QueryBuilder'
 
 
 function VolumeTooltip({ active, payload, label }) {
@@ -56,15 +57,16 @@ function FacetGroup({ title, options, selected, onToggle }) {
 }
 
 const EXTRA_FIELDS = [
+  { key: 'endpoint', label: 'endpoint' },
+  { key: 'log.exception.type', label: 'log.exception.type' },
   { key: 'log.level', label: 'log.level' },
+  { key: 'log.stacktrace', label: 'log.stacktrace' },
+  { key: 'path', label: 'path' },
   { key: 'service', label: 'service' },
-  { key: 'k8s.namespace.name', label: 'k8s.namespace.name' },
-  { key: 'k8s.pod.name', label: 'k8s.pod.name' },
-  { key: 'host.name', label: 'host.name' },
-  { key: 'env', label: 'env' },
+  { key: 'trace_id', label: 'trace_id' },
 ]
 
-const DEFAULT_FIELDS = new Set(['service', 'k8s.namespace.name'])
+const DEFAULT_FIELDS = new Set()
 
 function FieldsDropdown({ activeFields, setActiveFields }) {
   const [open, setOpen] = useState(false)
@@ -91,8 +93,11 @@ function FieldsDropdown({ activeFields, setActiveFields }) {
         <div className="fields-drop">
           <div className="fields-drop-head">
             <span>Fields ({count})</span>
-            <button className="fields-drop-toggle" onClick={() => setActiveFields(count === EXTRA_FIELDS.length ? new Set() : new Set(EXTRA_FIELDS.map(f => f.key)))}>
-              {count === EXTRA_FIELDS.length ? '☐' : '☑'}
+            <button
+              className="fields-drop-select-all"
+              onClick={() => setActiveFields(count === EXTRA_FIELDS.length ? new Set() : new Set(EXTRA_FIELDS.map(f => f.key)))}
+            >
+              {count === EXTRA_FIELDS.length ? 'Deselect all' : 'Select all'}
             </button>
           </div>
           <div className="fields-drop-search">
@@ -137,6 +142,21 @@ function PatternsDrawer({ onClose }) {
       </aside>
     </div>
   )
+}
+
+function presetToMinutes(tr) {
+  const map = {
+    'Last 5 minutes': 5, 'Last 15 minutes': 15, 'Last 30 minutes': 30,
+    'Last 1 hour': 60, 'Last 2 hours': 120, 'Last 3 hours': 180,
+    'Last 6 hours': 360, 'Last 12 hours': 720, 'Last 24 hours': 1440,
+    'Last 2 days': 2880, 'Last 3 days': 4320, 'Last 7 days': 10080,
+  }
+  if (tr === 'Today' || tr === 'Today so far') {
+    const now = BASE_TIME
+    const sod = new Date(now); sod.setHours(0, 0, 0, 0)
+    return Math.round((now - sod) / 60000)
+  }
+  return map[tr] ?? null
 }
 
 const FILTERS_MIN_W = 232
@@ -232,12 +252,81 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const [filters, setFilters] = useState({})
   const [selectedId, setSelectedId] = useState(null)
   const [query, setQuery] = useState('')
+  const [chips, setChips] = useState([])
+  const [recents, setRecents] = useState([
+    [{ field: 'service', op: ':', value: 'payment' }, { field: 'log.level', op: ':', value: 'error' }],
+    [{ field: 'duration_ms', op: '>', value: '500' }],
+    [{ field: 'log.level', op: '!=', value: 'info' }],
+  ])
+  const addRecent = useCallback((next) => {
+    if (!next || next.length === 0) return
+    const key = chipsToString(next)
+    setRecents(prev => {
+      const dedup = prev.filter(r => chipsToString(r) !== key)
+      return [next, ...dedup].slice(0, 5)
+    })
+  }, [])
   const [live, setLive] = useState('off')
   const [activeFields, setActiveFields] = useState(DEFAULT_FIELDS)
   const [filtersWidth, setFiltersWidth] = useState(FILTERS_MIN_W)
+  const [graphVisible, setGraphVisible] = useState(true)
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
+  const [zoom, setZoom] = useState(null)
+  const [dragBrush, setDragBrush] = useState(null)
   const dragRef = useRef(null)
+  const brushStartRef = useRef(null)
+  const prevTimeRangeRef = useRef(timeRange)
+
+  const clearZoom = useCallback(() => {
+    if (zoom && prevTimeRangeRef.current) setTimeRange(prevTimeRangeRef.current)
+    setZoom(null)
+  }, [zoom, setTimeRange])
+
+  const wrappedSetTimeRange = useCallback((v) => {
+    if (!v?.startsWith?.('Custom')) prevTimeRangeRef.current = v
+    setZoom(null)
+    setTimeRange(v)
+  }, [setTimeRange])
+
+  useEffect(() => {
+    if (!zoom) return
+    const span = zoom.m1 - zoom.m2 + 1
+    const spanLabel = span === 1 ? '1 min' : `${span} min`
+    const fromLabel = zoom.m1 === 0 ? 'now' : `-${zoom.m1}m`
+    const toLabel = zoom.m2 === 0 ? 'now' : `-${zoom.m2}m`
+    setTimeRange(`Custom · ${fromLabel} → ${toLabel} (${spanLabel})`)
+  }, [zoom, setTimeRange])
+
+  useEffect(() => {
+    const onUp = () => {
+      if (!brushStartRef.current) return
+      const startLabel = brushStartRef.current
+      brushStartRef.current = null
+      setDragBrush(prev => {
+        if (prev && prev.s1 !== prev.s2) {
+          const b1 = logVolume.find(d => d.label === prev.s1)
+          const b2 = logVolume.find(d => d.label === prev.s2)
+          if (b1 && b2) {
+            setZoom({ m1: Math.max(b1.m, b2.m), m2: Math.min(b1.m, b2.m) })
+          }
+        }
+        return null
+      })
+    }
+    document.addEventListener('mouseup', onUp)
+    return () => document.removeEventListener('mouseup', onUp)
+  }, [])
+
+  const onChartMouseDown = (e) => {
+    if (!e?.activeLabel) return
+    brushStartRef.current = e.activeLabel
+    setDragBrush({ s1: e.activeLabel, s2: e.activeLabel })
+  }
+  const onChartMouseMove = (e) => {
+    if (!brushStartRef.current || !e?.activeLabel) return
+    setDragBrush(prev => (prev && prev.s2 === e.activeLabel ? prev : { s1: brushStartRef.current, s2: e.activeLabel }))
+  }
 
   const startResize = useCallback((e) => {
     e.preventDefault()
@@ -275,26 +364,52 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const filtered = useMemo(() => {
     const lvlSet = getSet('log.level')
     const svcSet = getSet('service')
-    const nsSet = getSet('k8s.namespace.name')
-    return logRows.filter(l => {
+    let rows = logRows.filter(l => {
       if (query && !l.message.toLowerCase().includes(query.toLowerCase())) return false
       if (lvlSet.size && !lvlSet.has(l.level)) return false
       if (svcSet.size && !svcSet.has(l.service)) return false
-      if (nsSet.size && !nsSet.has(l.tags['k8s.namespace.name'])) return false
+      if (chips.length && !applyChipsToLog(l, chips)) return false
       return true
     })
-  }, [filters, query])
+    if (zoom) {
+      const now = BASE_TIME.getTime()
+      const tMin = now - (zoom.m1 + 1) * 60000
+      const tMax = now - zoom.m2 * 60000
+      rows = rows.filter(l => l.time.getTime() >= tMin && l.time.getTime() <= tMax)
+    } else {
+      const mins = presetToMinutes(timeRange)
+      if (mins !== null) {
+        const cutoff = BASE_TIME.getTime() - mins * 60000
+        rows = rows.filter(l => l.time.getTime() >= cutoff)
+      }
+    }
+    return rows
+  }, [filters, query, chips, zoom, timeRange])
+
+  const visibleVolume = useMemo(() => {
+    if (zoom) return logVolume.filter(d => d.m >= zoom.m2 && d.m <= zoom.m1)
+    const mins = presetToMinutes(timeRange)
+    if (mins !== null) return logVolume.filter(d => d.m <= mins)
+    return logVolume
+  }, [zoom, timeRange])
+
+  const visibleTotals = useMemo(() => ({
+    total: visibleVolume.reduce((a, b) => a + b.total, 0),
+    error: visibleVolume.reduce((a, b) => a + b.error, 0),
+    warn: visibleVolume.reduce((a, b) => a + b.warn, 0),
+    info: visibleVolume.reduce((a, b) => a + b.info, 0),
+  }), [visibleVolume])
 
   const selected = selectedId ? filtered.find(l => l.id === selectedId) : null
 
   return (
     <>
-      <PageBar timeRange={timeRange} setTimeRange={setTimeRange}>
+      <PageBar timeRange={timeRange} setTimeRange={wrappedSetTimeRange}>
         <a onClick={goHome}>CubeAPM</a>
         <span className="sep">/</span>
         <span className="current">Logs</span>
       </PageBar>
-      <div className="logs-layout" style={{ gridTemplateColumns: `${filtersWidth}px 1fr` }}>
+      <div className="logs-layout logs-layout-stitched" style={{ gridTemplateColumns: `${filtersWidth}px 1fr` }}>
       <div className="logs-filters">
         <div className="logs-filters-head">
           <span>Filters</span>
@@ -304,8 +419,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
         </div>
         <FacetGroup title="log.level" options={logFacets['log.level']} selected={getSet('log.level')} onToggle={toggleFilter} />
         <FacetGroup title="service" options={logFacets['service']} selected={getSet('service')} onToggle={toggleFilter} />
-        <FacetGroup title="k8s.namespace.name" options={logFacets['k8s.namespace.name']} selected={getSet('k8s.namespace.name')} onToggle={toggleFilter} />
-        <FacetGroup title="k8s.deployment.name" options={logFacets['k8s.deployment.name']} selected={getSet('k8s.deployment.name')} onToggle={toggleFilter} />
         <div
           className="logs-filters-resize"
           onMouseDown={startResize}
@@ -317,35 +430,39 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
 
       <div className="logs-main">
         <div className="logs-query-bar">
-          <div className="logs-query-input">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-            <input placeholder="Filter log text - e.g. exception, timeout, 500" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()} />
-            <svg className="logs-return-hint" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
-          </div>
+          <QueryBuilder
+            chips={chips}
+            setChips={setChips}
+            recents={recents}
+            addRecent={addRecent}
+            onRun={() => { /* results already reactive; kept as an explicit signal */ }}
+          />
           <button className="hbtn small icon-only" title="Query history" aria-label="Query history">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
           </button>
-          <button className="hbtn small" onClick={() => downloadCSV(filtered)} title="Download as CSV">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            CSV
-          </button>
-          <button className="hbtn small" onClick={() => setAlertOpen(true)} title="Create alert from this query">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 10a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 004 0"/><line x1="12" y1="2" x2="12" y2="4"/></svg>
-            Alert
-          </button>
-          <button className="hbtn small" title="Explore — advanced query mode (coming soon)" disabled>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-2 6-6 2 2-6z"/></svg>
-            Explore
+          <button
+            className="hbtn small primary"
+            title="Run query"
+            aria-label="Run query"
+            onClick={() => addRecent(chips)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
+            Run
           </button>
         </div>
 
         <div className="logs-controls">
-          <button className="hbtn small" onClick={() => setPatternsOpen(true)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-            Top Patterns
-          </button>
-          <FieldsDropdown activeFields={activeFields} setActiveFields={setActiveFields} />
-          <div className="live-toggle">
+          <div className="logs-controls-left">
+            <button className={`hbtn small${!graphVisible ? ' brand-lit' : ''}`} onClick={() => setGraphVisible(v => !v)} title={graphVisible ? 'Hide graph' : 'Show graph'}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="13" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="13" rx="1"/><rect x="18" y="3" width="4" height="18" rx="1"/></svg>
+              {graphVisible ? 'Hide graph' : 'Show graph'}
+            </button>
+            <button className="hbtn small" onClick={() => setPatternsOpen(true)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+              Top Patterns
+            </button>
+            <FieldsDropdown activeFields={activeFields} setActiveFields={setActiveFields} />
+            <div className="live-toggle">
             <button
               className={`live-btn${live === 'on' ? ' active' : live === 'pause' ? ' paused' : ''}`}
               onClick={() => setLive(live === 'off' ? 'on' : 'off')}
@@ -368,29 +485,62 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
               </button>
             )}
           </div>
+          </div>
+          <div className="logs-controls-right">
+          <button className="hbtn small" onClick={() => downloadCSV(filtered)} title="Download as CSV">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            CSV
+          </button>
+          <button className="hbtn small" onClick={() => setAlertOpen(true)} title="Create alert from this query">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 10a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 004 0"/><line x1="12" y1="2" x2="12" y2="4"/></svg>
+            Alert
+          </button>
+          <button className="hbtn small" title="Explore — advanced query mode (coming soon)" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-2 6-6 2 2-6z"/></svg>
+            Explore
+          </button>
+          </div>
         </div>
 
-        <div className="logs-volume">
+        {graphVisible && <div className="logs-volume">
           <div className="logs-volume-chart">
+            {zoom && (
+              <button className="volume-reset-btn" onClick={clearZoom} title="Clear time selection">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                Reset zoom
+              </button>
+            )}
+            {!zoom && (
+              <div className="volume-brush-hint">Click & drag on chart to zoom in</div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={logVolume} margin={{ top: 8, right: 6, left: 0, bottom: 0 }}>
+              <BarChart
+                data={visibleVolume}
+                margin={{ top: 8, right: 6, left: 0, bottom: 0 }}
+                onMouseDown={onChartMouseDown}
+                onMouseMove={onChartMouseMove}
+                style={{ cursor: brushStartRef.current ? 'ew-resize' : 'crosshair', userSelect: 'none' }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.floor(logVolume.length / 6)} minTickGap={20} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border-subtle)' }} interval={Math.max(0, Math.floor(visibleVolume.length / 6))} minTickGap={20} />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={34} />
-                <Tooltip content={<VolumeTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
-                <Bar dataKey="info" stackId="v" fill="#60A5FA" fillOpacity={0.55} />
-                <Bar dataKey="warn" stackId="v" fill="#F59E0B" fillOpacity={0.75} />
-                <Bar dataKey="error" stackId="v" fill="#EF4444" fillOpacity={0.85} />
+                <Tooltip content={<VolumeTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} isAnimationActive={false} />
+                <Bar dataKey="info" stackId="v" fill="#60A5FA" fillOpacity={0.55} isAnimationActive={false} />
+                <Bar dataKey="warn" stackId="v" fill="#F59E0B" fillOpacity={0.75} isAnimationActive={false} />
+                <Bar dataKey="error" stackId="v" fill="#EF4444" fillOpacity={0.85} isAnimationActive={false} />
+                {dragBrush && dragBrush.s1 !== dragBrush.s2 && (
+                  <ReferenceArea x1={dragBrush.s1} x2={dragBrush.s2} stroke="var(--brand)" strokeOpacity={0.6} fill="var(--brand)" fillOpacity={0.14} />
+                )}
               </BarChart>
             </ResponsiveContainer>
           </div>
           <div className="logs-volume-legend">
-            <div className="lvl-row"><span className="lvl-key">Total</span><span className="lvl-val">{(logTotals.total / 1000).toFixed(2)}K</span></div>
-            <div className="lvl-row"><span className="lvl-swatch" style={{ background: '#EF4444' }} /><span className="lvl-key">error</span><span className="lvl-val val-critical">{logTotals.error}</span></div>
-            <div className="lvl-row"><span className="lvl-swatch" style={{ background: '#F59E0B' }} /><span className="lvl-key">warn</span><span className="lvl-val val-warning">{logTotals.warn}</span></div>
-            <div className="lvl-row"><span className="lvl-swatch" style={{ background: '#60A5FA' }} /><span className="lvl-key">info</span><span className="lvl-val">{logTotals.info.toLocaleString()}</span></div>
+            <div className="lvl-row"><span className="lvl-key">Total</span><span className="lvl-val">{visibleTotals.total >= 1000 ? `${(visibleTotals.total / 1000).toFixed(2)}K` : visibleTotals.total.toLocaleString()}</span></div>
+            <div className="lvl-row"><span className="lvl-swatch" style={{ background: '#EF4444' }} /><span className="lvl-key">error</span><span className="lvl-val val-critical">{visibleTotals.error}</span></div>
+            <div className="lvl-row"><span className="lvl-swatch" style={{ background: '#F59E0B' }} /><span className="lvl-key">warn</span><span className="lvl-val val-warning">{visibleTotals.warn}</span></div>
+            <div className="lvl-row"><span className="lvl-swatch" style={{ background: '#60A5FA' }} /><span className="lvl-key">info</span><span className="lvl-val">{visibleTotals.info.toLocaleString()}</span></div>
           </div>
-        </div>
+        </div>}
 
         <div className={`logs-stream-wrap${selected ? ' has-detail' : ''}`}>
           <div className="logs-stream">
@@ -422,8 +572,9 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
                 </div>
                 <span className="log-text">{l.message}</span>
                 <span className="log-stream">
+                  <span className="log-tag"><span className="k">env</span><span className="v">{l.tags.env}</span></span>
+                  <span className="log-tag"><span className="k">log.level</span><span className="v">{l.level}</span></span>
                   <span className="log-tag"><span className="k">service</span><span className="v">{l.service}</span></span>
-                  <span className="log-tag"><span className="k">ns</span><span className="v">{l.tags['k8s.namespace.name']}</span></span>
                 </span>
                 {[...activeFields].map(f => (
                   <span key={f} className="log-extra mono">{l.tags[f] ?? l[f] ?? ''}</span>

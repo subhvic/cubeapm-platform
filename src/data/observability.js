@@ -1,6 +1,6 @@
 import { statusForLatency } from '@/utils/status'
 
-const BASE_TIME = new Date()
+export const BASE_TIME = new Date()
 
 const seededRnd = seed => {
   let s = seed
@@ -10,59 +10,61 @@ const seededRnd = seed => {
 /* ============ LOGS ============ */
 
 const LOG_LEVELS = ['error', 'warn', 'info']
-const LOG_SERVICES = ['payment-service', 'order-service', 'shipment-service', 'notify-service', 'search-service', 'analytics-service']
-const LOG_DEPLOYMENTS = ['payment-service', 'order-service', 'shipment-service', 'notify-service', 'search-service', 'analytics-service', 'coredns', 'otel-collector']
-const LOG_NAMESPACES = ['default', 'kube-system']
+const LOG_SERVICES = ['order', 'payment', 'shipment', 'search']
 
-const SAMPLE_MESSAGES = {
-  error: [
-    'redis.clients.jedis.exceptions.JedisPoolException: Could not get a resource from the pool',
-    'java.lang.RuntimeException: 500 Internal Server Error at PaymentsController.capture',
-    'com.twilio.exception.ApiException: 429 Too Many Requests - messages/create rate exceeded',
-    'DB connection timed out after 3000ms - pool=payments, host=mysql.cubedemo:3306',
-    'panic: runtime error: invalid memory address or nil pointer dereference in analytics/pipeline.go:118',
-  ],
-  warn: [
-    'W0716 12:38:37.667847 1 warnings.go:70] v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice',
-    'slow query detected duration=812ms query=SELECT * FROM `payments`.`transactions` WHERE ...',
-    'circuit breaker opened for downstream=payment-service failure_rate=0.42 window=60s',
-    'GC pause exceeded budget: 118ms > 80ms - heap=483MB / 640MB',
-    'retry attempt=3 backoff=800ms endpoint=api.twilio.com reason=connection_reset',
-  ],
-  info: [
-    'trace ingested span_count=42 root=POST /v1/payments/:id/capture duration=812ms',
-    'HTTP 200 POST /v1/payments/tx_9f2a1c7e/capture duration=214ms',
-    'kubernetes probe passed - /healthz status=ok replica=3/3',
-    'flushed metrics batch=1024 latency=18ms exporter=otlp',
-    'accepted connection from 10.0.142.7 socket=fd=17 pool=redis',
-  ],
+const SVC_ENDPOINT = { order: '/v1/order', payment: '/v1/payment', shipment: '/v1/shipment', search: '/v1/search' }
+
+const STACKTRACE_TMPL = `com.cubedemo.db.ConnectionPool: Connection refused to database host
+\tat com.cubedemo.db.ConnectionPool.acquire(ConnectionPool.java:84)
+\tat com.cubedemo.service.Repository.findById(Repository.java:112)
+\tat com.cubedemo.service.RequestHandler.handle(RequestHandler.java:57)
+\tat com.cubedemo.server.HttpServer.dispatch(HttpServer.java:203)`
+
+function makeMessage(level, svc, ts) {
+  if (level === 'error') return 'Failed connecting to database'
+  if (level === 'warn') return `received HTTP 400 from https://notify.cubedemo.com${SVC_ENDPOINT[svc]}`
+  return `processing request {\n  details: {\n    service: {\n      name: ${svc}\n    }\n  }\n  displayMessage: Transaction committed\n  systemMessage: request handled successfully\n  timestamp: ${ts}\n} operation successful`
 }
 
-const SAMPLE_TAGS = {
-  'payment-service': { 'k8s.namespace.name': 'default', 'k8s.pod.name': 'payment-service-7d8b9c-4vk2q', 'host.name': 'ip-10-0-142-133' },
-  'order-service': { 'k8s.namespace.name': 'default', 'k8s.pod.name': 'order-service-6c8f4b-8ct9x', 'host.name': 'ip-10-0-142-2' },
-  'shipment-service': { 'k8s.namespace.name': 'default', 'k8s.pod.name': 'shipment-service-9a3d2e-jf22n', 'host.name': 'ip-10-0-143-40' },
-  'notify-service': { 'k8s.namespace.name': 'default', 'k8s.pod.name': 'notify-service-4b7e2d-lm5vp', 'host.name': 'ip-10-0-130-150' },
-  'search-service': { 'k8s.namespace.name': 'default', 'k8s.pod.name': 'search-service-1d5c8a-xw3qz', 'host.name': 'ip-10-0-142-2' },
-  'analytics-service': { 'k8s.namespace.name': 'default', 'k8s.pod.name': 'analytics-service-3f9a1b-qk7dr', 'host.name': 'ip-10-0-129-151' },
+function hexId(rnd, len) {
+  return Array.from({ length: len }, () => Math.floor(rnd() * 16).toString(16)).join('')
 }
 
-function generateLogs(n = 80) {
+function generateLogs(n = 180) {
   const rnd = seededRnd(17)
   const now = BASE_TIME.getTime()
   const rows = []
   for (let i = 0; i < n; i++) {
-    const offsetSec = i * 12 + rnd() * 5
+    const offsetSec = i * 20 + rnd() * 8
     const t = new Date(now - offsetSec * 1000)
     const svc = LOG_SERVICES[Math.floor(rnd() * LOG_SERVICES.length)]
     let level
     const r = rnd()
-    if (r < 0.08) level = 'error'
-    else if (r < 0.24) level = 'warn'
+    if (r < 0.12) level = 'error'
+    else if (r < 0.38) level = 'warn'
     else level = 'info'
-    const msgs = SAMPLE_MESSAGES[level]
-    const message = msgs[Math.floor(rnd() * msgs.length)]
-    const tags = { ...SAMPLE_TAGS[svc], 'log.level': level, service: svc, env: 'production' }
+    const isError = level === 'error'
+    const ts = t.toISOString()
+    const message = makeMessage(level, svc, ts)
+    const traceId = hexId(rnd, 32)
+    const httpStatus = isError ? 500 : level === 'warn' ? 400 : 200
+    const durationMs = isError
+      ? Math.round(800 + rnd() * 2400)
+      : level === 'warn'
+        ? Math.round(180 + rnd() * 520)
+        : Math.round(20 + rnd() * 160)
+    const tags = {
+      env: 'UNSET',
+      'log.level': level,
+      service: svc,
+      endpoint: SVC_ENDPOINT[svc],
+      path: SVC_ENDPOINT[svc],
+      'http.status': httpStatus,
+      duration_ms: durationMs,
+      trace_id: traceId,
+      'log.exception.type': isError ? 'ConnectionRefusedException' : '',
+      'log.stacktrace': isError ? STACKTRACE_TMPL : '',
+    }
     rows.push({
       id: `log_${i}_${Math.floor(rnd() * 100000)}`,
       time: t,
@@ -77,7 +79,7 @@ function generateLogs(n = 80) {
   return rows
 }
 
-export const logRows = generateLogs(80)
+export const logRows = generateLogs(180)
 
 function generateLogVolume(points = 60) {
   const rnd = seededRnd(29)
@@ -93,12 +95,10 @@ function generateLogVolume(points = 60) {
 export const logVolume = generateLogVolume(60)
 
 export const logFacets = {
-  'k8s.deployment.name': LOG_DEPLOYMENTS.map(d => ({ value: d, count: Math.floor(20 + Math.random() * 400) })),
-  'k8s.namespace.name': LOG_NAMESPACES.map(d => ({ value: d, count: d === 'default' ? 3210 : 1420 })),
   'log.level': [
     { value: 'error', count: logRows.filter(l => l.level === 'error').length },
-    { value: 'warn', count: logRows.filter(l => l.level === 'warn').length },
     { value: 'info', count: logRows.filter(l => l.level === 'info').length },
+    { value: 'warn', count: logRows.filter(l => l.level === 'warn').length },
   ],
   service: LOG_SERVICES.map(d => ({ value: d, count: logRows.filter(l => l.service === d).length })),
 }
