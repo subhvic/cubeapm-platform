@@ -361,16 +361,39 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
 
   const getSet = key => filters[key] || new Set()
 
-  const filtered = useMemo(() => {
+  // Rows matching chips/query/facets but NOT the time window — used to build the volume histogram.
+  const chipFilteredRows = useMemo(() => {
     const lvlSet = getSet('log.level')
     const svcSet = getSet('service')
-    let rows = logRows.filter(l => {
+    return logRows.filter(l => {
       if (query && !l.message.toLowerCase().includes(query.toLowerCase())) return false
       if (lvlSet.size && !lvlSet.has(l.level)) return false
       if (svcSet.size && !svcSet.has(l.service)) return false
       if (chips.length && !applyChipsToLog(l, chips)) return false
       return true
     })
+  }, [filters, query, chips])
+
+  // Per-minute histogram derived from chipFilteredRows.
+  const filteredVolume = useMemo(() => {
+    const now = BASE_TIME.getTime()
+    const buckets = Array.from({ length: 60 }, (_, i) => {
+      const m = 59 - i
+      return { m, info: 0, warn: 0, error: 0, total: 0, label: m === 0 ? 'now' : `-${m}m` }
+    })
+    chipFilteredRows.forEach(l => {
+      const m = Math.floor((now - l.time.getTime()) / 60000)
+      if (m >= 0 && m < 60) {
+        const idx = 59 - m
+        buckets[idx][l.level]++
+        buckets[idx].total++
+      }
+    })
+    return buckets
+  }, [chipFilteredRows])
+
+  const filtered = useMemo(() => {
+    let rows = chipFilteredRows
     if (zoom) {
       const now = BASE_TIME.getTime()
       const tMin = now - (zoom.m1 + 1) * 60000
@@ -384,14 +407,14 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       }
     }
     return rows
-  }, [filters, query, chips, zoom, timeRange])
+  }, [chipFilteredRows, zoom, timeRange])
 
   const visibleVolume = useMemo(() => {
-    if (zoom) return logVolume.filter(d => d.m >= zoom.m2 && d.m <= zoom.m1)
+    if (zoom) return filteredVolume.filter(d => d.m >= zoom.m2 && d.m <= zoom.m1)
     const mins = presetToMinutes(timeRange)
-    if (mins !== null) return logVolume.filter(d => d.m <= mins)
-    return logVolume
-  }, [zoom, timeRange])
+    if (mins !== null) return filteredVolume.filter(d => d.m <= mins)
+    return filteredVolume
+  }, [zoom, timeRange, filteredVolume])
 
   const visibleTotals = useMemo(() => ({
     total: visibleVolume.reduce((a, b) => a + b.total, 0),

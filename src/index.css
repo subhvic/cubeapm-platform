@@ -1018,7 +1018,7 @@ tbody tr:hover { background: var(--panel-2); }
   border-radius: var(--radius-sm); padding: 5px 10px; min-height: 32px;
   cursor: text; transition: border-color .12s;
 }
-.qb-input-row:focus-within { border-color: var(--brand); background: var(--panel-2); }
+.qb-input-row:focus-within { border-color: var(--brand); }
 .qb-input-row > svg { width: 13px; height: 13px; color: var(--text-muted); flex-shrink: 0; }
 
 .qb-chip {

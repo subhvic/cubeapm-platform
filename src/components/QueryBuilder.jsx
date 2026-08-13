@@ -167,9 +167,9 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   const flatItems = useMemo(() => {
     if (suggestions.mode === 'fields') {
       return [
+        ...suggestions.facets.map((f, i) => ({ kind: 'facet', payload: f, key: `f${i}` })),
         ...suggestions.recents.map((r, i) => ({ kind: 'recent', payload: r, key: `r${i}` })),
         ...suggestions.saved.map((s, i) => ({ kind: 'saved', payload: s, key: `s${i}` })),
-        ...suggestions.facets.map((f, i) => ({ kind: 'facet', payload: f, key: `f${i}` })),
       ]
     }
     if (suggestions.mode === 'operators') {
@@ -346,6 +346,23 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
 
             {suggestions.mode === 'fields' && (
               <>
+                <Section label="Top Facets / Keys" meta="Indexed">
+                  {suggestions.facets.length === 0 ? (
+                    <Empty>No fields match "{text}"</Empty>
+                  ) : suggestions.facets.map((f, i) => {
+                    const idx = flatItems.findIndex(x => x.key === `f${i}`)
+                    return (
+                      <Row key={`f${i}`} icon={f.type === 'number' ? '#' : 'A'} active={idx === highlight}
+                        onHover={() => setHighlight(idx)} onPick={() => commitItem(flatItems[idx])}
+                        label={<>
+                          <span className="mono">{f.field}</span>
+                          <span className="qb-ov-meta">{f.highCard ? 'high cardinality' : f.desc}</span>
+                        </>}
+                        meta={<span className="qb-ov-type">{f.type}</span>} />
+                    )
+                  })}
+                </Section>
+
                 <Section label="Recent Searches" meta={suggestions.recents.length ? `Last ${suggestions.recents.length}` : 'Empty'}>
                   {suggestions.recents.length === 0 ? (
                     <Empty>No recent searches yet — run a query to save it here.</Empty>
@@ -371,23 +388,6 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                           <span className="qb-ov-name">{s.name}</span>
                           <span className="qb-ov-preview mono">{chipsToString(s.chips)}</span>
                         </>} />
-                    )
-                  })}
-                </Section>
-
-                <Section label="Top Facets / Keys" meta="Indexed">
-                  {suggestions.facets.length === 0 ? (
-                    <Empty>No fields match "{text}"</Empty>
-                  ) : suggestions.facets.map((f, i) => {
-                    const idx = flatItems.findIndex(x => x.key === `f${i}`)
-                    return (
-                      <Row key={`f${i}`} icon={f.type === 'number' ? '#' : 'A'} active={idx === highlight}
-                        onHover={() => setHighlight(idx)} onPick={() => commitItem(flatItems[idx])}
-                        label={<>
-                          <span className="mono">{f.field}</span>
-                          <span className="qb-ov-meta">{f.highCard ? 'high cardinality' : f.desc}</span>
-                        </>}
-                        meta={<span className="qb-ov-type">{f.type}</span>} />
                     )
                   })}
                 </Section>
