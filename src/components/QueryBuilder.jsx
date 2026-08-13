@@ -1,54 +1,144 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { Fragment, useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { logRows } from '@/data/observability'
 
 // ---------- Field catalog ----------
+// Types map to CubeAPM's log query grammar (docs.cubeapm.com/logs/querying).
+// `keyword` is short numeric/alphanumeric text (status codes, small ints) that
+// still uses string-style operators — CubeAPM's log grammar has no `>`/`<`.
 
 const FIELD_CATALOG = [
-  { field: 'service', type: 'string', desc: 'Service name' },
-  { field: 'log.level', type: 'string', desc: 'Log severity' },
-  { field: 'env', type: 'string', desc: 'Environment' },
-  { field: 'endpoint', type: 'string', desc: 'Request endpoint' },
-  { field: 'path', type: 'string', desc: 'Request path' },
-  { field: 'log.exception.type', type: 'string', desc: 'Exception class' },
-  { field: 'http.status', type: 'number', desc: 'HTTP status code' },
-  { field: 'duration_ms', type: 'number', desc: 'Request duration (ms)' },
-  { field: 'trace_id', type: 'string', desc: 'Trace identifier', highCard: true },
+  { field: 'service',            type: 'string',  desc: 'Service name' },
+  { field: 'log.level',          type: 'string',  desc: 'Log severity' },
+  { field: 'env',                type: 'string',  desc: 'Environment' },
+  { field: 'endpoint',           type: 'string',  desc: 'Request endpoint' },
+  { field: 'path',               type: 'string',  desc: 'Request path' },
+  { field: 'log.exception.type', type: 'string',  desc: 'Exception class' },
+  { field: 'http.status',        type: 'keyword', desc: 'HTTP status code' },
+  { field: 'duration_ms',        type: 'keyword', desc: 'Request duration (ms)' },
+  { field: 'trace_id',           type: 'string',  desc: 'Trace identifier', highCard: true },
 ]
 
 const FIELD_BY_NAME = Object.fromEntries(FIELD_CATALOG.map(f => [f.field, f]))
 
-// Operators are filtered by field type — a string field never offers `>`
+// Operator catalog — mirrors CubeAPM query grammar.
+// `sym` is what shows in the operator picker's icon slot.
+// `freeText` = user must type a value (no picklist).
+// `noValue`  = commit immediately, no value phase.
 const OPERATORS = {
   string: [
-    { op: ':', label: 'is', hint: 'Exact match' },
-    { op: '!=', label: 'is not', hint: 'Excludes this value' },
-    { op: '~', label: 'contains', hint: 'Substring match', freeText: true },
-    { op: 'EXISTS', label: 'exists', hint: 'Field is present', noValue: true },
+    { op: 'word',     label: 'is (word)',      hint: 'field:value  — word/token match',                  sym: ':',     cat: 'Equality' },
+    { op: 'eq',       label: 'is exactly',     hint: 'field:=value  — exact match',                      sym: ':=',    cat: 'Equality' },
+    { op: 'neq',      label: 'is not',         hint: 'field!=value  — excludes this value',              sym: '!=',    cat: 'Equality' },
+    { op: 'in',       label: 'in (list)',      hint: 'field in ("a","b")  — matches any of these',       sym: 'in',    cat: 'List',       multi: true },
+    { op: 'not_in',   label: 'not in (list)',  hint: 'field not_in ("a","b")  — none of these',          sym: '!in',   cat: 'List',       multi: true },
+    { op: 'contains', label: 'contains',       hint: 'field:*value*  — substring anywhere',              sym: ':*_*',  cat: 'Text',       freeText: true },
+    { op: 'prefix',   label: 'starts with',    hint: 'field:value*  — prefix match',                     sym: ':_*',   cat: 'Text',       freeText: true },
+    { op: 'phrase',   label: 'matches phrase', hint: 'field:"a b c"  — multi-word exact',                sym: ':"_"',  cat: 'Text',       freeText: true },
+    { op: 'regex',    label: 'matches regex',  hint: 'field:~"pattern"  — regular expression',           sym: ':~',    cat: 'Pattern',    freeText: true },
+    { op: 'nregex',   label: 'not regex',      hint: 'field!~"pattern"  — negated regex',                sym: '!~',    cat: 'Pattern',    freeText: true },
+    { op: 'exists',   label: 'exists',         hint: 'field:*  — any non-empty value',                   sym: ':*',    cat: 'Presence',   noValue: true },
+    { op: 'empty',    label: 'is empty',       hint: 'field:""  — field is present but empty',           sym: ':""',   cat: 'Presence',   noValue: true },
   ],
-  number: [
-    { op: ':', label: 'equals', hint: 'Exact match' },
-    { op: '!=', label: 'not equals', hint: 'Excludes this value' },
-    { op: '>', label: 'greater than', hint: 'Numeric compare', freeText: true },
-    { op: '>=', label: 'greater or equal', hint: 'Numeric compare', freeText: true },
-    { op: '<', label: 'less than', hint: 'Numeric compare', freeText: true },
-    { op: '<=', label: 'less or equal', hint: 'Numeric compare', freeText: true },
-    { op: 'EXISTS', label: 'exists', hint: 'Field is present', noValue: true },
+  keyword: [
+    { op: 'word',     label: 'is',             hint: 'field:value  — word match',                        sym: ':',     cat: 'Equality' },
+    { op: 'eq',       label: 'is exactly',     hint: 'field:=value  — exact match',                      sym: ':=',    cat: 'Equality' },
+    { op: 'neq',      label: 'is not',         hint: 'field!=value  — excludes this value',              sym: '!=',    cat: 'Equality' },
+    { op: 'in',       label: 'in (list)',      hint: 'field in ("a","b")  — matches any of these',       sym: 'in',    cat: 'List',       multi: true },
+    { op: 'not_in',   label: 'not in (list)',  hint: 'field not_in ("a","b")  — none of these',          sym: '!in',   cat: 'List',       multi: true },
+    { op: 'prefix',   label: 'starts with',    hint: 'field:5*  — e.g. 5* covers all 5xx codes',         sym: ':_*',   cat: 'Text',       freeText: true },
+    { op: 'exists',   label: 'exists',         hint: 'field:*  — field is present',                      sym: ':*',    cat: 'Presence',   noValue: true },
   ],
+  highCard: [
+    { op: 'eq',       label: 'is exactly',     hint: 'field:=value  — exact match',                      sym: ':=',    cat: 'Equality' },
+    { op: 'prefix',   label: 'starts with',    hint: 'field:value*  — prefix match',                     sym: ':_*',   cat: 'Text',       freeText: true },
+    { op: 'regex',    label: 'matches regex',  hint: 'field:~"pattern"  — regular expression',           sym: ':~',    cat: 'Pattern',    freeText: true },
+    { op: 'exists',   label: 'exists',         hint: 'field:*  — field is present',                      sym: ':*',    cat: 'Presence',   noValue: true },
+  ],
+}
+
+const CATEGORY_ORDER = ['Equality', 'List', 'Text', 'Pattern', 'Presence']
+
+function opSetFor(field) {
+  const meta = FIELD_BY_NAME[field]
+  if (!meta) return OPERATORS.string
+  if (meta.highCard) return OPERATORS.highCard
+  if (meta.type === 'keyword') return OPERATORS.keyword
+  return OPERATORS.string
+}
+
+function opMetaFor(field, op) {
+  return opSetFor(field).find(o => o.op === op)
+}
+
+// Renders the op+value portion of a chip using CubeAPM's canonical syntax.
+// The full chip is `field` + this string.
+function asArray(v) {
+  if (Array.isArray(v)) return v
+  if (v == null || v === '') return []
+  return [v]
+}
+
+function opValueText(op, value) {
+  const v = value ?? ''
+  switch (op) {
+    case 'exists':   return ':*'
+    case 'empty':    return ':""'
+    case 'word':     return `:${v}`
+    case 'eq':       return `:=${v}`
+    case 'neq':      return `!=${v}`
+    case 'in':       return ` in (${asArray(value).map(x => `"${x}"`).join(', ')})`
+    case 'not_in':   return ` not_in (${asArray(value).map(x => `"${x}"`).join(', ')})`
+    case 'contains': return `:*${v}*`
+    case 'prefix':   return `:${v}*`
+    case 'phrase':   return `:"${v}"`
+    case 'regex':    return `:~"${v}"`
+    case 'nregex':   return `!~"${v}"`
+    default:         return `:${v}`
+  }
+}
+
+// Renders just the operator prefix for the composing chip (before user picks a value).
+function opStartText(op) {
+  switch (op) {
+    case 'exists':   return ':*'
+    case 'empty':    return ':""'
+    case 'word':     return ':'
+    case 'eq':       return ':='
+    case 'neq':      return '!='
+    case 'in':       return ' in ('
+    case 'not_in':   return ' not_in ('
+    case 'contains': return ':*'
+    case 'prefix':   return ':'
+    case 'phrase':   return ':"'
+    case 'regex':    return ':~"'
+    case 'nregex':   return '!~"'
+    default:         return ':'
+  }
 }
 
 const SAVED_QUERIES = [
   { name: 'Payments — errors last hour', chips: [
-    { field: 'service', op: ':', value: 'payment' },
-    { field: 'log.level', op: ':', value: 'error' },
-  ]},
-  { name: 'Slow requests over 800ms', chips: [
-    { field: 'duration_ms', op: '>', value: '800' },
+    { field: 'service',   op: 'eq', value: 'payment' },
+    { field: 'log.level', op: 'eq', value: 'error' },
   ]},
   { name: 'Server errors (5xx)', chips: [
-    { field: 'http.status', op: '>=', value: '500' },
+    { field: 'http.status', op: 'prefix', value: '5' },
+  ]},
+  { name: 'Payment path — anything matching', chips: [
+    { field: 'path', op: 'contains', value: 'payment' },
   ]},
   { name: 'Connection failures', chips: [
-    { field: 'log.exception.type', op: ':', value: 'ConnectionRefusedException' },
+    { field: 'log.exception.type', op: 'eq', value: 'ConnectionRefusedException' },
+  ]},
+  { name: 'Any exception raised', chips: [
+    { field: 'log.exception.type', op: 'exists' },
+  ]},
+  { name: 'Payment or order services', chips: [
+    { field: 'service', op: 'in', value: ['payment', 'order'] },
+  ]},
+  { name: 'Errors OR warnings only', chips: [
+    { field: 'log.level', op: 'eq', value: 'error' },
+    { field: 'log.level', op: 'eq', value: 'warn', connector: 'OR' },
   ]},
 ]
 
@@ -75,48 +165,102 @@ function computeTopValues(field, k = 24) {
     .map(([value, count]) => ({ value, count }))
 }
 
-export function chipsToString(chips) {
-  return chips.map(c => {
-    if (c.op === 'EXISTS') return `${c.field} EXISTS`
-    if (c.op === ':') return `${c.field}:${c.value}`
-    return `${c.field} ${c.op} ${c.value}`
-  }).join(' AND ')
+// Stream selectors have their own syntax (`=`, `!=`, `=~`, `!~`) and only support
+// a limited op set. When a chip qualifies, we promote it into the leading `{}` block.
+const STREAM_FIELDS = new Set(['env', 'service'])
+
+const STREAM_OP_MAP = {
+  eq:     (f, v) => `${f}="${v}"`,
+  neq:    (f, v) => `${f}!="${v}"`,
+  in:     (f, v) => `${f} in (${asArray(v).map(x => `"${x}"`).join(', ')})`,
+  not_in: (f, v) => `${f} not_in (${asArray(v).map(x => `"${x}"`).join(', ')})`,
+  regex:  (f, v) => `${f}=~"${v}"`,
+  nregex: (f, v) => `${f}!~"${v}"`,
 }
 
-export function applyChipsToLog(log, chips) {
-  for (const c of chips) {
-    const raw = getFieldValue(log, c.field)
-    if (c.op === 'EXISTS') {
-      if (raw == null || raw === '') return false
-      continue
-    }
-    if (raw == null) return false
-    const s = String(raw)
-    if (c.op === ':') { if (s !== String(c.value)) return false; continue }
-    if (c.op === '!=') { if (s === String(c.value)) return false; continue }
-    if (c.op === '~') {
-      if (!s.toLowerCase().includes(String(c.value).toLowerCase())) return false
-      continue
-    }
-    const a = parseFloat(s)
-    const b = parseFloat(c.value)
-    if (Number.isNaN(a) || Number.isNaN(b)) return false
-    if (c.op === '>' && !(a > b)) return false
-    if (c.op === '>=' && !(a >= b)) return false
-    if (c.op === '<' && !(a < b)) return false
-    if (c.op === '<=' && !(a <= b)) return false
+function isStreamable(chip) {
+  return STREAM_FIELDS.has(chip.field) && !!STREAM_OP_MAP[chip.op]
+}
+
+export function chipsToString(chips) {
+  // Promote the longest run of AND-connected stream-eligible chips at the front.
+  let splitAt = 0
+  for (let i = 0; i < chips.length; i++) {
+    const c = chips[i]
+    if (i > 0 && c.connector === 'OR') break
+    if (!isStreamable(c)) break
+    splitAt = i + 1
   }
-  return true
+  const streams = chips.slice(0, splitAt)
+  const rest = chips.slice(splitAt)
+
+  const streamStr = streams.length > 0
+    ? `{${streams.map(c => STREAM_OP_MAP[c.op](c.field, c.value)).join(', ')}}`
+    : ''
+
+  const restStr = rest.map((c, i) => {
+    const chunk = `${c.field}${opValueText(c.op, c.value)}`
+    if (i === 0) return chunk
+    return `${c.connector === 'OR' ? 'OR' : 'AND'} ${chunk}`
+  }).join(' ')
+
+  if (streamStr && restStr) return `${streamStr} ${restStr}`
+  return streamStr || restStr
+}
+
+function tokenize(s) {
+  return s.toLowerCase().split(/[^a-z0-9._-]+/i).filter(Boolean)
+}
+
+function matchChip(log, c) {
+  const raw = getFieldValue(log, c.field)
+  const present = raw != null && raw !== ''
+  if (c.op === 'exists') return present
+  if (c.op === 'empty')  return !present
+  if (!present) return false
+  const s = String(raw)
+  const sl = s.toLowerCase()
+  const v = String(c.value ?? '')
+  const vl = v.toLowerCase()
+  switch (c.op) {
+    case 'word':     return tokenize(s).includes(vl) || sl === vl
+    case 'eq':       return s === v
+    case 'neq':      return s !== v
+    case 'in':       return asArray(c.value).map(String).includes(s)
+    case 'not_in':   return !asArray(c.value).map(String).includes(s)
+    case 'contains': return sl.includes(vl)
+    case 'prefix':   return sl.startsWith(vl)
+    case 'phrase':   return sl.includes(vl)
+    case 'regex':    { try { return new RegExp(v).test(s) } catch { return false } }
+    case 'nregex':   { try { return !new RegExp(v).test(s) } catch { return false } }
+    default: return false
+  }
+}
+
+// Evaluates chips left-to-right, respecting per-chip `connector` (default AND).
+// No operator precedence — users can reorder chips to control evaluation order.
+export function applyChipsToLog(log, chips) {
+  if (chips.length === 0) return true
+  let result = matchChip(log, chips[0])
+  for (let i = 1; i < chips.length; i++) {
+    const c = chips[i]
+    const m = matchChip(log, c)
+    if (c.connector === 'OR') result = result || m
+    else result = result && m
+  }
+  return result
 }
 
 // ---------- Component ----------
 
-export default function QueryBuilder({ chips, setChips, recents = [], addRecent, onRun }) {
+export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   // null → field phase | { field, type, highCard } → operator phase | { …, op } → value phase
   const [composing, setComposing] = useState(null)
   const [highlight, setHighlight] = useState(0)
+  // Selected values while composing a multi-value chip (in / not_in)
+  const [pendingValues, setPendingValues] = useState([])
   const wrapRef = useRef(null)
   const inputRef = useRef(null)
   const listRef = useRef(null)
@@ -129,23 +273,42 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   }, [])
 
   // Whether the value phase needs a typed value instead of a picklist
-  const opMeta = composing?.op
-    ? OPERATORS[composing.type].find(o => o.op === composing.op)
-    : null
-  const needsTypedValue = !!(composing?.highCard || opMeta?.freeText)
+  const opMeta = composing?.op ? opMetaFor(composing.field, composing.op) : null
+  const isMulti = !!opMeta?.multi
+  const needsTypedValue = !!(!isMulti && (composing?.highCard || opMeta?.freeText))
+
+  // Reset pending selections whenever we (re)enter a multi-value composing session.
+  useEffect(() => {
+    if (isMulti) setPendingValues([])
+  }, [isMulti, composing?.field, composing?.op])
 
   const suggestions = useMemo(() => {
     const q = text.trim().toLowerCase()
 
     if (phase === 'operator') {
-      const ops = OPERATORS[composing.type] || OPERATORS.string
+      const ops = opSetFor(composing.field)
       const filtered = q
-        ? ops.filter(o => o.op.toLowerCase().includes(q) || o.label.toLowerCase().includes(q))
+        ? ops.filter(o => o.op.toLowerCase().includes(q) || o.label.toLowerCase().includes(q) || o.sym.toLowerCase().includes(q))
         : ops
-      return { mode: 'operators', items: filtered }
+      // Sort by declared category order so flat (keyboard) index matches visual order.
+      const sorted = [...filtered].sort((a, b) => {
+        const ai = CATEGORY_ORDER.indexOf(a.cat)
+        const bi = CATEGORY_ORDER.indexOf(b.cat)
+        return ai - bi
+      })
+      return { mode: 'operators', items: sorted }
     }
 
     if (phase === 'value') {
+      if (isMulti) {
+        const values = computeTopValues(composing.field) || []
+        const filtered = q ? values.filter(v => v.value.toLowerCase().includes(q)) : values
+        // Offer a "custom value" row when typed text isn't in the list yet.
+        const customRow = q && !filtered.some(v => v.value.toLowerCase() === q)
+          ? { value: text.trim(), count: 0, custom: true }
+          : null
+        return { mode: 'multi-values', items: customRow ? [customRow, ...filtered] : filtered }
+      }
       if (needsTypedValue) return { mode: 'typed-value' }
       const values = computeTopValues(composing.field)
       const filtered = q ? values.filter(v => v.value.toLowerCase().includes(q)) : values
@@ -155,14 +318,16 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     const rec = recents
       .filter(r => !q || chipsToString(r).toLowerCase().includes(q))
       .slice(0, 5)
-    const sav = SAVED_QUERIES.filter(s =>
+    // User-saved queries appear before the built-in demo set.
+    const allSaved = [...savedQueries, ...SAVED_QUERIES]
+    const sav = allSaved.filter(s =>
       !q || s.name.toLowerCase().includes(q) || chipsToString(s.chips).toLowerCase().includes(q)
     )
     const fac = FIELD_CATALOG.filter(f =>
       !q || f.field.toLowerCase().includes(q) || f.desc.toLowerCase().includes(q)
     )
     return { mode: 'fields', recents: rec, saved: sav, facets: fac }
-  }, [text, phase, composing, needsTypedValue, recents])
+  }, [text, phase, composing, needsTypedValue, recents, savedQueries])
 
   const flatItems = useMemo(() => {
     if (suggestions.mode === 'fields') {
@@ -177,6 +342,9 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     }
     if (suggestions.mode === 'values') {
       return suggestions.items.map((v, i) => ({ kind: 'value', payload: v, key: `v${i}` }))
+    }
+    if (suggestions.mode === 'multi-values') {
+      return suggestions.items.map((v, i) => ({ kind: 'multi-value', payload: v, key: `m${i}` }))
     }
     return []
   }, [suggestions])
@@ -205,7 +373,8 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   }
 
   const commitChip = (chip) => {
-    setChips([...chips, chip])
+    const withConnector = chips.length === 0 ? chip : { connector: 'AND', ...chip }
+    setChips([...chips, withConnector])
     setComposing(null)
     setText('')
     inputRef.current?.focus()
@@ -232,6 +401,13 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
       commitChip({ field: composing.field, op: composing.op, value: item.payload.value })
       return
     }
+    if (item.kind === 'multi-value') {
+      const v = String(item.payload.value)
+      setPendingValues(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])
+      setText('')
+      inputRef.current?.focus()
+      return
+    }
     if (item.kind === 'recent') { applyChipSet(item.payload); return }
     if (item.kind === 'saved') { applyChipSet(item.payload.chips); return }
   }
@@ -239,6 +415,11 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   const commitTypedValue = () => {
     if (!composing?.op || !text.trim()) return
     commitChip({ field: composing.field, op: composing.op, value: text.trim() })
+  }
+
+  const commitMultiValues = () => {
+    if (!composing?.op || pendingValues.length === 0) return
+    commitChip({ field: composing.field, op: composing.op, value: pendingValues })
   }
 
   const stepBack = () => {
@@ -265,6 +446,11 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setHighlight(h => Math.max(h - 1, 0))
+    } else if (isMulti && e.key === 'Tab') {
+      // Tab commits the accumulated multi-value chip; Shift+Tab clears the last pending.
+      e.preventDefault()
+      if (e.shiftKey && pendingValues.length) setPendingValues(pendingValues.slice(0, -1))
+      else if (pendingValues.length) commitMultiValues()
     } else if (e.key === 'Enter' || e.key === 'Tab') {
       if (flatItems.length > 0) {
         e.preventDefault()
@@ -286,14 +472,41 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
 
   const removeChip = (idx, e) => {
     e?.stopPropagation()
-    setChips(chips.filter((_, i) => i !== idx))
+    const next = chips.filter((_, i) => i !== idx)
+    // If we removed the first chip, strip the connector from the new first chip.
+    if (next.length > 0 && next[0].connector) {
+      next[0] = { ...next[0], connector: undefined }
+    }
+    setChips(next)
     inputRef.current?.focus()
+  }
+
+  const toggleConnector = (idx) => {
+    if (idx <= 0 || idx >= chips.length) return
+    const next = [...chips]
+    next[idx] = { ...next[idx], connector: next[idx].connector === 'OR' ? 'AND' : 'OR' }
+    setChips(next)
+  }
+
+  const typedValuePlaceholder = (op, field) => {
+    switch (op) {
+      case 'regex':    return `Regex pattern for ${field} (e.g. ^error.*)`
+      case 'nregex':   return `Regex to exclude on ${field} (e.g. ^info)`
+      case 'contains': return `Substring to match anywhere in ${field}…`
+      case 'prefix':   return `Prefix for ${field} (e.g. pay matches payment, payer)`
+      case 'phrase':   return `Phrase in ${field} — multi-word exact (quotes auto)`
+      default:         return `Type a value for ${field}…`
+    }
   }
 
   const placeholder = phase === 'operator'
     ? `Choose an operator for ${composing.field}…`
     : phase === 'value'
-      ? (needsTypedValue ? `Type a value for ${composing.field}…` : `Search values for ${composing.field}…`)
+      ? (isMulti
+          ? `Pick values — Tab to commit ${pendingValues.length ? `(${pendingValues.length} selected)` : ''}`
+          : needsTypedValue
+            ? typedValuePlaceholder(composing.op, composing.field)
+            : `Search values for ${composing.field}…`)
       : chips.length
         ? 'Add another filter'
         : 'Type a field name (e.g. service, duration_ms) or free text'
@@ -306,24 +519,39 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
         </svg>
 
         {chips.map((c, i) => (
-          <span key={`${c.field}${c.op}${c.value}${i}`} className="qb-chip">
-            <span className="qb-chip-field">{c.field}</span>
-            <span className="qb-chip-op">{c.op}</span>
-            {c.op !== 'EXISTS' && <span className="qb-chip-value">{c.value}</span>}
-            <button
-              type="button"
-              className="qb-chip-x"
-              onClick={(e) => removeChip(i, e)}
-              aria-label={`Remove filter ${c.field} ${c.op} ${c.value ?? ''}`}
-              title="Remove filter"
-            >×</button>
-          </span>
+          <Fragment key={`chip${i}`}>
+            {i > 0 && (
+              <button
+                type="button"
+                className={`qb-connector${c.connector === 'OR' ? ' or' : ''}`}
+                onClick={(e) => { e.stopPropagation(); toggleConnector(i) }}
+                title={`Boolean connector — click to toggle (currently ${c.connector === 'OR' ? 'OR' : 'AND'})`}
+                aria-label={`Toggle connector — currently ${c.connector === 'OR' ? 'OR' : 'AND'}`}
+              >
+                {c.connector === 'OR' ? 'OR' : 'AND'}
+              </button>
+            )}
+            <span className="qb-chip">
+              <span className="qb-chip-field">{c.field}</span>
+              <span className="qb-chip-opval">{opValueText(c.op, c.value)}</span>
+              <button
+                type="button"
+                className="qb-chip-x"
+                onClick={(e) => removeChip(i, e)}
+                aria-label={`Remove filter ${c.field}${opValueText(c.op, c.value)}`}
+                title="Remove filter"
+              >×</button>
+            </span>
+          </Fragment>
         ))}
 
         {composing && (
           <span className="qb-composing" aria-live="polite">
             <span className="qb-composing-field">{composing.field}</span>
-            {composing.op != null && <span className="qb-composing-op">{composing.op}</span>}
+            {composing.op != null && <span className="qb-composing-op">{opStartText(composing.op)}</span>}
+            {isMulti && pendingValues.length > 0 && (
+              <span className="qb-composing-op">{pendingValues.map(v => `"${v}"`).join(', ')})</span>
+            )}
           </span>
         )}
 
@@ -352,7 +580,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                   ) : suggestions.facets.map((f, i) => {
                     const idx = flatItems.findIndex(x => x.key === `f${i}`)
                     return (
-                      <Row key={`f${i}`} icon={f.type === 'number' ? '#' : 'A'} active={idx === highlight}
+                      <Row key={`f${i}`} icon={f.type === 'keyword' ? '#' : 'A'} active={idx === highlight}
                         onHover={() => setHighlight(idx)} onPick={() => commitItem(flatItems[idx])}
                         label={<>
                           <span className="mono">{f.field}</span>
@@ -394,24 +622,42 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
               </>
             )}
 
-            {suggestions.mode === 'operators' && (
-              <Section
-                label={`Operators for ${composing.field}`}
-                meta={`${composing.type} field`}
-              >
-                {suggestions.items.map((o, i) => {
-                  const idx = flatItems.findIndex(x => x.key === `o${i}`)
-                  return (
-                    <Row key={`o${i}`} icon={<span className="qb-ov-opsym">{o.op}</span>} active={idx === highlight}
-                      onHover={() => setHighlight(idx)} onPick={() => commitItem(flatItems[idx])}
-                      label={<>
-                        <span className="qb-ov-name">{o.label}</span>
-                        <span className="qb-ov-meta">{o.hint}</span>
-                      </>} />
-                  )
-                })}
-              </Section>
-            )}
+            {suggestions.mode === 'operators' && (() => {
+              // Group ops by category, preserving the flat index for keyboard nav
+              const grouped = CATEGORY_ORDER
+                .map(cat => ({ cat, ops: suggestions.items.filter(o => o.cat === cat) }))
+                .filter(g => g.ops.length > 0)
+              return (
+                <div className="qb-ov-ops-wrap">
+                  <div className="qb-ov-header">
+                    <span className="qb-ov-lbl">Operators for {composing.field}</span>
+                    <span className="qb-ov-lbl-meta">
+                      {composing.highCard ? 'high-cardinality field' : `${composing.type} field`}
+                    </span>
+                  </div>
+                  {grouped.map(({ cat, ops }) => (
+                    <div key={cat} className="qb-ov-subsection">
+                      <div className="qb-ov-subhead">{cat}</div>
+                      {ops.map(o => {
+                        const flatIdx = suggestions.items.indexOf(o)
+                        const idx = flatItems.findIndex(x => x.key === `o${flatIdx}`)
+                        return (
+                          <Row key={`o${flatIdx}`}
+                            icon={<span className="qb-ov-opsym">{o.sym}</span>}
+                            active={idx === highlight}
+                            onHover={() => setHighlight(idx)}
+                            onPick={() => commitItem(flatItems[idx])}
+                            label={<>
+                              <span className="qb-ov-name">{o.label}</span>
+                              <span className="qb-ov-meta mono">{o.hint}</span>
+                            </>} />
+                        )
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
 
             {suggestions.mode === 'values' && (
               <Section
@@ -432,6 +678,32 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
               </Section>
             )}
 
+            {suggestions.mode === 'multi-values' && (
+              <Section
+                label={`Values for ${composing.field} ${composing.op === 'in' ? '(in)' : '(not in)'}`}
+                meta={`${pendingValues.length} selected`}
+              >
+                {suggestions.items.length === 0 ? (
+                  <Empty>No values match "{text}".</Empty>
+                ) : suggestions.items.map((v, i) => {
+                  const idx = flatItems.findIndex(x => x.key === `m${i}`)
+                  const checked = pendingValues.includes(String(v.value))
+                  return (
+                    <Row key={`m${i}`}
+                      icon={<span className={`qb-mv-check${checked ? ' on' : ''}`}>{checked ? '✓' : ''}</span>}
+                      active={idx === highlight}
+                      onHover={() => setHighlight(idx)}
+                      onPick={() => commitItem(flatItems[idx])}
+                      label={<>
+                        <span className="mono">{v.value}</span>
+                        {v.custom && <span className="qb-ov-meta">custom value</span>}
+                      </>}
+                      meta={v.custom ? null : <span className="mono">{v.count.toLocaleString()} logs</span>} />
+                  )
+                })}
+              </Section>
+            )}
+
             {suggestions.mode === 'typed-value' && (
               <div className="qb-hc-section">
                 <div className="qb-ov-header">
@@ -442,13 +714,15 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                   <p>
                     {composing.highCard
                       ? <><span className="mono">{composing.field}</span> is a high-cardinality field — too many distinct values to list. Type an exact value.</>
-                      : composing.op === '~'
-                        ? <>Type the text to match inside <span className="mono">{composing.field}</span>.</>
-                        : <>Type a number to compare against <span className="mono">{composing.field}</span>.</>}
+                      : composing.op === 'regex' || composing.op === 'nregex'
+                        ? <>Type a regular expression to match against <span className="mono">{composing.field}</span>.</>
+                        : composing.op === 'phrase'
+                          ? <>Type the phrase to match inside <span className="mono">{composing.field}</span>. Quotes are added automatically.</>
+                          : <>Type the text to match against <span className="mono">{composing.field}</span>.</>}
                   </p>
                   <button type="button" className="qb-hc-commit" disabled={!text.trim()} onClick={commitTypedValue}>
                     {text.trim()
-                      ? `Add filter ${composing.field} ${composing.op} ${text.trim()}`
+                      ? `Add filter ${composing.field}${opValueText(composing.op, text.trim())}`
                       : 'Add filter'}
                   </button>
                 </div>
@@ -456,10 +730,27 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
             )}
           </div>
 
+          {suggestions.mode === 'multi-values' && (
+            <div className="qb-mv-foot">
+              <span className="qb-mv-count">{pendingValues.length} selected</span>
+              <button
+                type="button"
+                className="qb-hc-commit qb-mv-commit"
+                disabled={pendingValues.length === 0}
+                onClick={commitMultiValues}
+              >
+                {pendingValues.length === 0
+                  ? 'Pick one or more values'
+                  : `Add ${composing.field}${opValueText(composing.op, pendingValues)}`}
+              </button>
+            </div>
+          )}
+
           <div className="qb-ov-foot">
             <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
-            <span><kbd>Tab</kbd> Insert &amp; continue</span>
-            <span><kbd>↵</kbd> Commit</span>
+            {isMulti
+              ? <><span><kbd>↵</kbd> Toggle</span><span><kbd>Tab</kbd> Commit</span></>
+              : <><span><kbd>Tab</kbd> Insert &amp; continue</span><span><kbd>↵</kbd> Commit</span></>}
             <span><kbd>⌫</kbd> Back</span>
             <span><kbd>Esc</kbd> Dismiss</span>
           </div>
