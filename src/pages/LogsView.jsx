@@ -254,9 +254,9 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const [query, setQuery] = useState('')
   const [chips, setChips] = useState([])
   const [recents, setRecents] = useState([
-    [{ field: 'service', op: ':', value: 'payment' }, { field: 'log.level', op: ':', value: 'error' }],
-    [{ field: 'duration_ms', op: '>', value: '500' }],
-    [{ field: 'log.level', op: '!=', value: 'info' }],
+    [{ field: 'service', op: 'eq', value: 'payment' }, { field: 'log.level', op: 'eq', value: 'error' }],
+    [{ field: 'http.status', op: 'prefix', value: '5' }],
+    [{ field: 'log.level', op: 'neq', value: 'info' }],
   ])
   const addRecent = useCallback((next) => {
     if (!next || next.length === 0) return
@@ -272,6 +272,16 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const [graphVisible, setGraphVisible] = useState(true)
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
+  const [userSavedQueries, setUserSavedQueries] = useState([])
+  const [savingName, setSavingName] = useState(null) // null = idle | string = editing name
+  const [justSaved, setJustSaved] = useState(false)
+  const saveCurrentQuery = useCallback((name) => {
+    if (!name.trim() || chips.length === 0) return
+    setUserSavedQueries(prev => [{ name: name.trim(), chips: [...chips] }, ...prev.filter(s => s.name !== name.trim())])
+    setJustSaved(true)
+    const timer = setTimeout(() => setJustSaved(false), 2000)
+    return () => clearTimeout(timer)
+  }, [chips])
   const [zoom, setZoom] = useState(null)
   const [dragBrush, setDragBrush] = useState(null)
   const dragRef = useRef(null)
@@ -374,23 +384,36 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     })
   }, [filters, query, chips])
 
-  // Per-minute histogram derived from chipFilteredRows.
+  // Scale logVolume (production-shaped baseline) by per-level filtered ratios.
+  // When no filters are active the ratios are all 1 → original chart is preserved.
+  // When filters are active each level's bar shrinks proportionally to how many
+  // rows in that minute match the filter, keeping the production-like visual shape.
   const filteredVolume = useMemo(() => {
+    const hasFilters = chips.length > 0 || !!query || Object.values(filters).some(s => s?.size)
+    if (!hasFilters) return logVolume
+
     const now = BASE_TIME.getTime()
-    const buckets = Array.from({ length: 60 }, (_, i) => {
-      const m = 59 - i
-      return { m, info: 0, warn: 0, error: 0, total: 0, label: m === 0 ? 'now' : `-${m}m` }
-    })
-    chipFilteredRows.forEach(l => {
+    const allByMin = {}, filtByMin = {}
+    const bucket = (acc, l) => {
       const m = Math.floor((now - l.time.getTime()) / 60000)
       if (m >= 0 && m < 60) {
-        const idx = 59 - m
-        buckets[idx][l.level]++
-        buckets[idx].total++
+        if (!acc[m]) acc[m] = { error: 0, warn: 0, info: 0 }
+        acc[m][l.level]++
       }
+    }
+    logRows.forEach(l => bucket(allByMin, l))
+    chipFilteredRows.forEach(l => bucket(filtByMin, l))
+
+    return logVolume.map(d => {
+      const all = allByMin[d.m]
+      if (!all) return { ...d, info: 0, warn: 0, error: 0, total: 0 }
+      const filt = filtByMin[d.m] || { error: 0, warn: 0, info: 0 }
+      const info  = all.info  > 0 ? Math.round(d.info  * filt.info  / all.info)  : 0
+      const warn  = all.warn  > 0 ? Math.round(d.warn  * filt.warn  / all.warn)  : 0
+      const error = all.error > 0 ? Math.round(d.error * filt.error / all.error) : 0
+      return { ...d, info, warn, error, total: info + warn + error }
     })
-    return buckets
-  }, [chipFilteredRows])
+  }, [chipFilteredRows, filters, query, chips])
 
   const filtered = useMemo(() => {
     let rows = chipFilteredRows
@@ -458,6 +481,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             setChips={setChips}
             recents={recents}
             addRecent={addRecent}
+            savedQueries={userSavedQueries}
             onRun={() => { /* results already reactive; kept as an explicit signal */ }}
           />
           <button className="hbtn small icon-only" title="Query history" aria-label="Query history">
@@ -473,6 +497,50 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             Run
           </button>
         </div>
+
+        {chips.length > 0 && (
+          <div className="logs-query-preview">
+            <span className="qb-preview-label">Query</span>
+            <code className="qb-preview-code">{chipsToString(chips)}</code>
+            <button
+              type="button"
+              className="qb-preview-copy"
+              onClick={() => { try { navigator.clipboard.writeText(chipsToString(chips)) } catch (_) {} }}
+              title="Copy query to clipboard"
+              aria-label="Copy query"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+            {savingName === null ? (
+              <button
+                type="button"
+                className={`qb-preview-save${justSaved ? ' saved' : ''}`}
+                onClick={() => !justSaved && setSavingName('')}
+                disabled={justSaved}
+                title={justSaved ? 'Query saved!' : "Save this query for later — appears in the Saved Queries section of the search overlay"}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                {justSaved ? 'Saved' : 'Save query'}
+              </button>
+            ) : (
+              <form
+                className="qb-preview-save-form"
+                onSubmit={(e) => { e.preventDefault(); if (savingName.trim()) { saveCurrentQuery(savingName); setSavingName(null) } }}
+              >
+                <input
+                  autoFocus
+                  className="qb-preview-save-input"
+                  placeholder="Query name…"
+                  value={savingName}
+                  onChange={(e) => setSavingName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setSavingName(null) }}
+                />
+                <button type="submit" className="qb-preview-save-confirm" disabled={!savingName.trim()}>Save</button>
+                <button type="button" className="qb-preview-save-cancel" onClick={() => setSavingName(null)} aria-label="Cancel">×</button>
+              </form>
+            )}
+          </div>
+        )}
 
         <div className="logs-controls">
           <div className="logs-controls-left">
@@ -565,19 +633,19 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           </div>
         </div>}
 
+        <div className="logs-stream-head">
+          <div className="log-fixed-cols">
+            <span className="lh-bar-spacer" />
+            <span className="lh-time">Time</span>
+          </div>
+          <span className="lh-text">Text</span>
+          <span className="lh-stream">Stream</span>
+          {[...activeFields].map(f => (
+            <span key={f} className="lh-extra">{f}</span>
+          ))}
+        </div>
         <div className={`logs-stream-wrap${selected ? ' has-detail' : ''}`}>
           <div className="logs-stream">
-            <div className="logs-stream-head">
-              <div className="log-fixed-cols">
-                <span className="lh-bar-spacer" />
-                <span className="lh-time">Time</span>
-              </div>
-              <span className="lh-text">Text</span>
-              <span className="lh-stream">Stream</span>
-              {[...activeFields].map(f => (
-                <span key={f} className="lh-extra">{f}</span>
-              ))}
-            </div>
             {filtered.length === 0 && (
               <div className="err-empty">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
