@@ -57,7 +57,31 @@
       "Bash(awk -F: '{print $2}')",
       "Bash(echo \"exit: $?\")",
       "Bash(git checkout *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git stash *)",
+      "Bash(cd \"/Users/subh_vic/Cube APM/cubeapm-platform\" && git show stash@{0}:.claude/settings.local.json > .claude/settings.local.json && git diff --stat .claude/settings.local.json && git stash drop)",
+      "Bash(git fetch *)",
+      "Bash(gh api *)",
+      "Bash(git push *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh pr create --title 'Logs UX overhaul: controls strip, sticky columns, portal popover, PageBar' --body ' *)",
+      "Bash(gh pr *)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['state'], d.get\\('mergedAt',''\\)\\)\")",
+      "Bash(git pull *)",
+      "mcp__claude-in-chrome__read_page",
+      "Bash(curl -s http://localhost:57506)",
+      "WebFetch(domain:spyk.app.coralogix.in)",
+      "WebFetch(domain:docs.google.com)",
+      "Bash(grep -E \"#[0-9A-Fa-f]{3,6}\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts\\)\\)\")",
+      "Bash(git commit *)",
+      "WebFetch(domain:docs.cubeapm.com)",
+      "Skill(schedule)",
+      "Skill(schedule:*)",
+      "Bash(node -e ' *)",
+      "Bash(node --check src/pages/LogsView.jsx)",
+      "Bash(npx esbuild *)",
+      "Bash(node src/utils/pipes.test.js)"
     ]
   }
 }
