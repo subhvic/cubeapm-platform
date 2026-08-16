@@ -6,7 +6,7 @@ import { logRows } from '@/data/observability'
 // `keyword` is short numeric/alphanumeric text (status codes, small ints) that
 // still uses string-style operators — CubeAPM's log grammar has no `>`/`<`.
 
-const FIELD_CATALOG = [
+export const FIELD_CATALOG = [
   { field: 'service',            type: 'string',  desc: 'Service name' },
   { field: 'log.level',          type: 'string',  desc: 'Log severity' },
   { field: 'env',                type: 'string',  desc: 'Environment' },
@@ -142,9 +142,10 @@ const SAVED_QUERIES = [
   ]},
 ]
 
-function getFieldValue(log, field) {
+export function getFieldValue(log, field) {
   if (field === 'log.level') return log.level
   if (field === 'service') return log.service
+  if (field === '_msg' || field === 'message') return log.message
   return log.tags?.[field]
 }
 

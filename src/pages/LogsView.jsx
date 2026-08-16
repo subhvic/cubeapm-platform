@@ -2,7 +2,37 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, ResponsiveContainer } from 'recharts'
 import { logRows, logVolume, logFacets, logTotals, BASE_TIME } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
-import QueryBuilder, { applyChipsToLog, chipsToString } from '@/components/QueryBuilder'
+import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue } from '@/components/QueryBuilder'
+import { aggregate } from '@/utils/aggregator'
+import AggregateResults from '@/components/AggregateResults'
+import { composeQuery, newStatsPipe, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
+import PipePill, { PipePillChip } from '@/components/PipePill'
+import AggregationPopover from '@/components/AggregationPopover'
+import GroupByPopover from '@/components/GroupByPopover'
+import OrderPopover from '@/components/OrderPopover'
+import LimitPopover from '@/components/LimitPopover'
+import MathPopover from '@/components/MathPopover'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator } from 'lucide-react'
+
+const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
+const AGG_NUMERIC_FIELDS = new Set(FIELD_CATALOG.filter(f => f.type === 'keyword').map(f => f.field))
+
+// Compact chip display for a saved stats function inside the Aggregation pill.
+function summarizeFn(f) {
+  if (f.as) return f.as
+  if (f.fn === 'quantile') return `q${Math.round((Number(f.p) || 0.9) * 100)}(${f.field || '·'})`
+  if (f.field) return `${f.fn}(${f.field})`
+  return `${f.fn}()`
+}
+
+// Full-form title used on hover (fn call + alias when present).
+function fullFn(f) {
+  const args = []
+  if (f.fn === 'quantile') args.push(Number(f.p) || 0.9)
+  if (f.field) args.push(f.field)
+  const call = `${f.fn}(${args.join(', ')})`
+  return f.as ? `${f.as} = ${call}` : call
+}
 
 
 function VolumeTooltip({ active, payload, label }) {
@@ -123,6 +153,95 @@ function FieldsDropdown({ activeFields, setActiveFields }) {
   )
 }
 
+const QUERY_HISTORY = (() => {
+  const now = BASE_TIME.getTime()
+  return [
+    { id: 1, query: 'service:payment AND log.level:error', time: new Date(now - 4 * 60000), results: 23, saved: 'Payment errors', actions: ['Created alert', 'Exported CSV'] },
+    { id: 2, query: 'http.status:5* AND service:order', time: new Date(now - 18 * 60000), results: 87, saved: null, actions: ['Shared link'] },
+    { id: 3, query: 'log.level:error', time: new Date(now - 42 * 60000), results: 119, saved: 'All errors', actions: [] },
+    { id: 4, query: '"Failed connecting to database"', time: new Date(now - 1.5 * 3600000), results: 34, saved: null, actions: ['Created alert'] },
+    { id: 5, query: 'service:search AND log.level!=info', time: new Date(now - 2.1 * 3600000), results: 56, saved: null, actions: [] },
+    { id: 6, query: 'endpoint:/v1/payment AND http.status:408', time: new Date(now - 3 * 3600000), results: 12, saved: 'Payment timeouts', actions: ['Exported CSV'] },
+    { id: 7, query: 'k8s.namespace.name:production AND log.level:warn', time: new Date(now - 5 * 3600000), results: 203, saved: null, actions: [] },
+    { id: 8, query: 'trace_id:abc123*', time: new Date(now - 7 * 3600000), results: 8, saved: null, actions: ['Opened trace'] },
+    { id: 9, query: 'service:shipment AND "timeout"', time: new Date(now - 12 * 3600000), results: 41, saved: 'Shipment timeouts', actions: ['Created alert', 'Shared link'] },
+    { id: 10, query: 'log.exception.type:NullPointerException', time: new Date(now - 18 * 3600000), results: 15, saved: null, actions: [] },
+    { id: 11, query: 'path:/v1/order AND log.level:error', time: new Date(now - 24 * 3600000), results: 67, saved: null, actions: ['Exported CSV'] },
+    { id: 12, query: 'service:payment AND "Transaction committed"', time: new Date(now - 36 * 3600000), results: 340, saved: null, actions: [] },
+  ]
+})()
+
+function formatHistoryTime(d) {
+  const now = BASE_TIME.getTime()
+  const diff = now - d.getTime()
+  if (diff < 60000) return 'just now'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
+  return `${Math.floor(diff / 86400000)}d ago`
+}
+
+function QueryHistoryDrawer({ onClose, onApply }) {
+  const [search, setSearch] = useState('')
+  const [tab, setTab] = useState('all')
+  const items = QUERY_HISTORY.filter(h => {
+    if (tab === 'saved' && !h.saved) return false
+    if (search && !h.query.toLowerCase().includes(search.toLowerCase()) && !(h.saved && h.saved.toLowerCase().includes(search.toLowerCase()))) return false
+    return true
+  })
+  return (
+    <div className="alert-drawer-overlay" onClick={onClose}>
+      <aside className="alert-drawer qh-drawer" onClick={e => e.stopPropagation()}>
+        <div className="alert-drawer-head">
+          <div>
+            <div className="alert-drawer-title">Query History</div>
+            <div className="alert-drawer-sub">Recent queries run on this workspace</div>
+          </div>
+          <button className="log-detail-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="qh-toolbar">
+          <div className="qh-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input placeholder="Search queries…" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <div className="qh-tabs">
+            <button className={`qh-tab${tab === 'all' ? ' active' : ''}`} onClick={() => setTab('all')}>All</button>
+            <button className={`qh-tab${tab === 'saved' ? ' active' : ''}`} onClick={() => setTab('saved')}>Saved</button>
+          </div>
+        </div>
+        <div className="qh-list">
+          {items.length === 0 && (
+            <div className="qh-empty">No queries match your search</div>
+          )}
+          {items.map(h => (
+            <div key={h.id} className="qh-item" onClick={() => onApply(h.query)}>
+              <div className="qh-item-top">
+                <code className="qh-item-query">{h.query}</code>
+                <span className="qh-item-time">{formatHistoryTime(h.time)}</span>
+              </div>
+              <div className="qh-item-meta">
+                <span className="qh-item-results">{h.results.toLocaleString()} results</span>
+                {h.saved && (
+                  <span className="qh-item-saved">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+                    {h.saved}
+                  </span>
+                )}
+                {h.actions.length > 0 && (
+                  <span className="qh-item-actions">
+                    {h.actions.map(a => <span key={a} className="qh-action-tag">{a}</span>)}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </aside>
+    </div>
+  )
+}
+
 function PatternsDrawer({ onClose }) {
   return (
     <div className="alert-drawer-overlay" onClick={onClose}>
@@ -161,6 +280,35 @@ function presetToMinutes(tr) {
 
 const FILTERS_MIN_W = 232
 const FILTERS_MAX_W = Math.round(FILTERS_MIN_W * 1.6)
+
+// Fields shown in the Stream column — selecting one of these values offers the
+// extra "Show distribution" action (mirrors CubeAPM's log selection menu).
+const STREAM_DIST_FIELDS = new Set(['env', 'log.level', 'service'])
+const DIST_BAR_COLOR = { error: '#EF4444', warn: '#F59E0B', info: '#60A5FA' }
+
+function rowFieldValue(row, field) {
+  if (field === 'log.level') return row.level
+  if (field === 'service') return row.service
+  if (field === '_msg' || field === 'message') return row.message
+  return row.tags?.[field]
+}
+
+function computeDistribution(rows, field, k = 12) {
+  const counts = {}
+  let total = 0
+  for (const r of rows) {
+    const v = rowFieldValue(r, field)
+    if (v == null || v === '') continue
+    counts[String(v)] = (counts[String(v)] || 0) + 1
+    total++
+  }
+  const items = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  return { items: items.slice(0, k), total, distinct: items.length }
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 function downloadCSV(rows) {
   const cols = ['time', 'level', 'service', 'message', 'k8s.namespace.name', 'k8s.pod.name', 'env']
@@ -267,11 +415,158 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     })
   }, [])
   const [live, setLive] = useState('off')
+  const [pipes, setPipes] = useState([])         // populated by the pill toolbar
+  const aggPillRef = useRef(null)
+  const [aggPopOpen, setAggPopOpen] = useState(false)
+  const [editingFuncId, setEditingFuncId] = useState(null)   // null = create mode
+  const groupByPillRef = useRef(null)
+  const [groupByPopOpen, setGroupByPopOpen] = useState(false)
+  const orderPillRef = useRef(null)
+  const [orderPopOpen, setOrderPopOpen] = useState(false)
+  const limitPillRef = useRef(null)
+  const [limitPopOpen, setLimitPopOpen] = useState(false)
+  const mathPillRef = useRef(null)
+  const [mathPopOpen, setMathPopOpen] = useState(false)
+  const [editingMathId, setEditingMathId] = useState(null)
+
+  // All stats functions currently defined across pipes[] (v1 has at most one
+  // stats pipe, but the model supports more so we flatten defensively).
+  const statsFunctions = useMemo(
+    () => pipes.filter(p => p.kind === 'stats').flatMap(p => p.functions || []),
+    [pipes]
+  )
+  const editingFunc = editingFuncId ? statsFunctions.find(f => f.id === editingFuncId) : null
+
+  const upsertAggregation = useCallback((fn) => {
+    setPipes(prev => {
+      const idx = prev.findIndex(p => p.kind === 'stats')
+      if (idx === -1) {
+        // First aggregation ever — create the stats pipe with this function.
+        return [...prev, newStatsPipe({ functions: [fn] })]
+      }
+      const stats = prev[idx]
+      const fnIdx = stats.functions.findIndex(f => f.id === fn.id)
+      const nextFns = fnIdx === -1
+        ? [...stats.functions, fn]                              // create
+        : stats.functions.map(f => f.id === fn.id ? fn : f)     // edit
+      const next = [...prev]
+      next[idx] = { ...stats, functions: nextFns }
+      return next
+    })
+  }, [])
+
+  // Group-by fields live on the stats pipe. Read the current array (or []
+   // if no stats pipe exists yet) and write updates through a single setter
+   // that only mutates when a stats pipe is present.
+  const groupBy = useMemo(() => {
+    const stats = pipes.find(p => p.kind === 'stats')
+    return stats?.groupBy || []
+  }, [pipes])
+
+  const setGroupBy = useCallback((next) => {
+    setPipes(prev => {
+      const idx = prev.findIndex(p => p.kind === 'stats')
+      const current = idx === -1 ? [] : (prev[idx].groupBy || [])
+      const nextArr = typeof next === 'function' ? next(current) : next
+      if (idx === -1) {
+        // No stats pipe yet — create an empty one holding the group-by so
+        // users can pre-configure grouping before adding aggregations.
+        if (nextArr.length === 0) return prev
+        return [...prev, newStatsPipe({ groupBy: nextArr, functions: [] })]
+      }
+      const stats = prev[idx]
+      // If both groupBy and functions become empty, drop the orphan pipe.
+      if (nextArr.length === 0 && stats.functions.length === 0) {
+        return prev.filter(p => p.id !== stats.id)
+      }
+      const next2 = [...prev]
+      next2[idx] = { ...stats, groupBy: nextArr }
+      return next2
+    })
+  }, [])
+
+  const removeAggregation = useCallback((funcId) => {
+    setPipes(prev => prev.flatMap(p => {
+      if (p.kind !== 'stats') return [p]
+      const nextFns = p.functions.filter(f => f.id !== funcId)
+      // Keep the pipe if groupBy still has values (so the user's grouping
+      // setup persists across "add/remove all aggregations" cycles).
+      if (nextFns.length === 0 && (!p.groupBy || p.groupBy.length === 0)) return []
+      return [{ ...p, functions: nextFns }]
+    }))
+  }, [])
+
+  // Sort / limit / math pipes are singletons for sort+limit, multi for math.
+   // These derived selectors + upserts keep LogsView state minimal (just
+   // `pipes`) while the pill toolbar reads the current shape declaratively.
+  const sortPipe = useMemo(() => pipes.find(p => p.kind === 'sort') || null, [pipes])
+  const limitPipe = useMemo(() => pipes.find(p => p.kind === 'limit') || null, [pipes])
+  const mathPipes = useMemo(() => pipes.filter(p => p.kind === 'math'), [pipes])
+  const editingMath = editingMathId ? mathPipes.find(p => p.id === editingMathId) : null
+
+  const removePipeById = useCallback((id) => {
+    setPipes(prev => prev.filter(p => p.id !== id))
+  }, [])
+
+  // Field options for Order — you can only sort by things that appear in the
+  // aggregation result: group-by columns and aliased stat outputs.
+  const orderFieldOptions = useMemo(() => {
+    const opts = []
+    for (const f of groupBy) opts.push({ value: f, hint: 'group by' })
+    for (const fn of statsFunctions) {
+      if (fn.as) opts.push({ value: fn.as, hint: 'aggregation' })
+    }
+    return opts
+  }, [groupBy, statsFunctions])
+
+  // Names available inside a math expression = aliased stats + prior math.
+  const mathAvailableNames = useMemo(() => {
+    const idx = editingMath
+      ? pipes.findIndex(p => p.id === editingMath.id)
+      : pipes.length
+    return namesInScopeBefore(pipes, idx === -1 ? pipes.length : idx)
+  }, [pipes, editingMath])
+
+  const openCreateMath = useCallback(() => {
+    setEditingMathId(null)
+    setMathPopOpen(true)
+  }, [])
+  const openEditMath = useCallback((id) => {
+    setEditingMathId(id)
+    setMathPopOpen(true)
+  }, [])
+  const closeMath = useCallback(() => {
+    setMathPopOpen(false)
+    setEditingMathId(null)
+  }, [])
+  const upsertMathPipe = useCallback((math) => {
+    setPipes(prev => {
+      const idx = prev.findIndex(p => p.id === math.id)
+      if (idx === -1) return [...prev, { ...newMathPipe(), ...math }]
+      const next = [...prev]
+      next[idx] = { ...prev[idx], ...math }
+      return next
+    })
+  }, [])
+
+  const openCreateAggregation = useCallback(() => {
+    setEditingFuncId(null)
+    setAggPopOpen(true)
+  }, [])
+  const openEditAggregation = useCallback((funcId) => {
+    setEditingFuncId(funcId)
+    setAggPopOpen(true)
+  }, [])
+  const closeAggregation = useCallback(() => {
+    setAggPopOpen(false)
+    setEditingFuncId(null)
+  }, [])
   const [activeFields, setActiveFields] = useState(DEFAULT_FIELDS)
   const [filtersWidth, setFiltersWidth] = useState(FILTERS_MIN_W)
   const [graphVisible, setGraphVisible] = useState(true)
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [userSavedQueries, setUserSavedQueries] = useState([])
   const [savingName, setSavingName] = useState(null) // null = idle | string = editing name
   const [justSaved, setJustSaved] = useState(false)
@@ -284,9 +579,85 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   }, [chips])
   const [zoom, setZoom] = useState(null)
   const [dragBrush, setDragBrush] = useState(null)
+  // Text-selection context menu: { x, y, text, field, value } | null
+  const [selMenu, setSelMenu] = useState(null)
+  // Distribution popover: { field, x, y } | null
+  const [distField, setDistField] = useState(null)
   const dragRef = useRef(null)
   const brushStartRef = useRef(null)
   const prevTimeRangeRef = useRef(timeRange)
+
+  // Detect a text selection inside the log table / detail panel and surface the menu.
+  const handleLogSelection = useCallback(() => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { setSelMenu(null); return }
+    const text = sel.toString().trim()
+    if (!text) { setSelMenu(null); return }
+    const range = sel.getRangeAt(0)
+    const node = range.commonAncestorContainer
+    const anchorEl = node.nodeType === 3 ? node.parentElement : node
+    if (!anchorEl?.closest?.('[data-log-content]')) { setSelMenu(null); return }
+    const fieldEl = anchorEl.closest('[data-log-field]')
+    const rect = range.getBoundingClientRect()
+    setDistField(null)
+    setSelMenu({
+      x: Math.max(8, Math.min(rect.left, window.innerWidth - 232)),
+      y: rect.bottom + 6,
+      text,
+      field: fieldEl ? fieldEl.getAttribute('data-log-field') : null,
+      value: fieldEl ? (fieldEl.getAttribute('data-log-value') ?? text) : text,
+    })
+  }, [])
+
+  const addChipToQuery = useCallback((chip) => {
+    setChips(prev => prev.length === 0 ? [chip] : [...prev, { connector: 'AND', ...chip }])
+  }, [setChips])
+
+  const applySelectionChip = useCallback((mode) => {
+    if (!selMenu) return
+    const { field, value, text } = selMenu
+    const chip = field
+      ? { field, op: mode === 'include' ? 'eq' : 'neq', value }
+      : mode === 'include'
+        ? { field: '_msg', op: 'contains', value: text }
+        : { field: '_msg', op: 'nregex', value: escapeRegex(text) }
+    addChipToQuery(chip)
+    window.getSelection()?.removeAllRanges()
+    setSelMenu(null)
+  }, [selMenu, addChipToQuery])
+
+  const copySelection = useCallback(() => {
+    if (!selMenu) return
+    try { navigator.clipboard.writeText(selMenu.text) } catch (_) {}
+    window.getSelection()?.removeAllRanges()
+    setSelMenu(null)
+  }, [selMenu])
+
+  const openDistribution = useCallback(() => {
+    if (!selMenu?.field) return
+    setDistField({ field: selMenu.field, x: selMenu.x, y: selMenu.y })
+    window.getSelection()?.removeAllRanges()
+    setSelMenu(null)
+  }, [selMenu])
+
+  // Dismiss menu/popover on Escape, outside click, or scroll.
+  useEffect(() => {
+    if (!selMenu && !distField) return
+    const onKey = (e) => { if (e.key === 'Escape') { setSelMenu(null); setDistField(null) } }
+    const onDown = (e) => {
+      if (e.target.closest?.('.log-sel-menu') || e.target.closest?.('.log-dist-pop')) return
+      setSelMenu(null); setDistField(null)
+    }
+    const onScroll = () => { setSelMenu(null); setDistField(null) }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDown)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+  }, [selMenu, distField])
 
   const clearZoom = useCallback(() => {
     if (zoom && prevTimeRangeRef.current) setTimeRange(prevTimeRangeRef.current)
@@ -384,6 +755,23 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     })
   }, [filters, query, chips])
 
+  // The composed query string — chips + serialized pipes. Kept as one memo
+  // so the preview visibility check and the copy-to-clipboard action stay
+  // in sync (both hide when the query is effectively empty).
+  const composedQuery = useMemo(() => composeQuery(chipsToString(chips), pipes), [chips, pipes])
+
+  // Run the client-side aggregator whenever chips or pipes change. Anchors
+   // to BASE_TIME so the mock stream (which is deterministic from BASE_TIME
+   // backward) always falls inside the window.
+  const aggregateResult = useMemo(() => aggregate({
+    pipes,
+    logs: chipFilteredRows,
+    getFieldValue,
+    now: BASE_TIME.getTime(),
+    timeRange: 60 * 60 * 1000,
+    bucketCount: 30,
+  }), [pipes, chipFilteredRows])
+
   // Scale logVolume (production-shaped baseline) by per-level filtered ratios.
   // When no filters are active the ratios are all 1 → original chart is preserved.
   // When filters are active each level's bar shrinks proportionally to how many
@@ -455,7 +843,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
         <span className="sep">/</span>
         <span className="current">Logs</span>
       </PageBar>
-      <div className="logs-layout logs-layout-stitched" style={{ gridTemplateColumns: `${filtersWidth}px 1fr` }}>
+      <div className="logs-layout logs-layout-stitched" style={{ gridTemplateColumns: `${filtersWidth}px 1fr` }} onMouseUp={handleLogSelection}>
       <div className="logs-filters">
         <div className="logs-filters-head">
           <span>Filters</span>
@@ -475,6 +863,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       </div>
 
       <div className="logs-main">
+      <div className="logs-main-body">
         <div className="logs-query-bar">
           <QueryBuilder
             chips={chips}
@@ -484,11 +873,105 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             savedQueries={userSavedQueries}
             onRun={() => { /* results already reactive; kept as an explicit signal */ }}
           />
-          <button className="hbtn small icon-only" title="Query history" aria-label="Query history">
+          <button className="hbtn small icon-only" title="Query history" aria-label="Query history" onClick={() => setHistoryOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
           </button>
+        </div>
+
+        <div className="pipe-toolbar">
+          <PipePill
+            ref={groupByPillRef}
+            icon={<Network />}
+            label="Group by"
+            active={groupByPopOpen}
+            onAddClick={() => setGroupByPopOpen(o => !o)}
+          >
+            {groupBy.length > 0 && groupBy.map(field => (
+              <PipePillChip
+                key={field}
+                title={`Grouping by ${field}`}
+                onRemove={() => setGroupBy(prev => prev.filter(f => f !== field))}
+              >
+                {field}
+              </PipePillChip>
+            ))}
+          </PipePill>
+          <PipePill
+            ref={aggPillRef}
+            icon={<Sigma />}
+            label="Aggregation"
+            active={aggPopOpen}
+            onAddClick={openCreateAggregation}
+          >
+            {statsFunctions.length > 0 && statsFunctions.map(fn => (
+              <PipePillChip
+                key={fn.id}
+                title={fullFn(fn)}
+                active={editingFuncId === fn.id && aggPopOpen}
+                onClick={() => openEditAggregation(fn.id)}
+                onRemove={() => removeAggregation(fn.id)}
+              >
+                {summarizeFn(fn)}
+              </PipePillChip>
+            ))}
+          </PipePill>
+          <PipePill
+            ref={orderPillRef}
+            icon={<ArrowUpDown />}
+            label="Order"
+            active={orderPopOpen}
+            addAffordance={sortPipe ? 'chevron' : 'plus'}
+            onAddClick={() => setOrderPopOpen(o => !o)}
+          >
+            {sortPipe && (
+              <PipePillChip
+                title={`Sort by ${sortPipe.field || '…'} ${sortPipe.dir === 'asc' ? 'ascending' : 'descending'}`}
+                onClick={() => setOrderPopOpen(true)}
+                onRemove={() => removePipeById(sortPipe.id)}
+              >
+                {sortPipe.field || '…'} {sortPipe.dir === 'asc' ? '↑' : '↓'}
+              </PipePillChip>
+            )}
+          </PipePill>
+          <PipePill
+            ref={limitPillRef}
+            icon={<Hash />}
+            label="Limit"
+            active={limitPopOpen}
+            addAffordance={limitPipe ? 'chevron' : 'plus'}
+            onAddClick={() => setLimitPopOpen(o => !o)}
+          >
+            {limitPipe && (
+              <PipePillChip
+                title={`Return at most ${Number(limitPipe.n).toLocaleString()} rows`}
+                onClick={() => setLimitPopOpen(true)}
+                onRemove={() => removePipeById(limitPipe.id)}
+              >
+                {Number(limitPipe.n).toLocaleString()}
+              </PipePillChip>
+            )}
+          </PipePill>
+          <PipePill
+            ref={mathPillRef}
+            icon={<Calculator />}
+            label="Math"
+            active={mathPopOpen && !editingMathId}
+            onAddClick={openCreateMath}
+          >
+            {mathPipes.length > 0 && mathPipes.map(mp => (
+              <PipePillChip
+                key={mp.id}
+                title={mp.expression + (mp.as ? ` as ${mp.as}` : '')}
+                active={editingMathId === mp.id && mathPopOpen}
+                onClick={() => openEditMath(mp.id)}
+                onRemove={() => removePipeById(mp.id)}
+              >
+                {mp.as || mp.expression || 'expr'}
+              </PipePillChip>
+            ))}
+          </PipePill>
           <button
-            className="hbtn small primary"
+            className="hbtn primary run-btn"
             title="Run query"
             aria-label="Run query"
             onClick={() => addRecent(chips)}
@@ -497,15 +980,69 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             Run
           </button>
         </div>
+        <AggregationPopover
+          anchorRef={aggPillRef}
+          open={aggPopOpen}
+          onClose={closeAggregation}
+          onSave={upsertAggregation}
+          initial={editingFunc}
+          allFields={AGG_ALL_FIELDS}
+          numericFields={AGG_NUMERIC_FIELDS}
+        />
+        <GroupByPopover
+          anchorRef={groupByPillRef}
+          open={groupByPopOpen}
+          onClose={() => setGroupByPopOpen(false)}
+          fields={FIELD_CATALOG}
+          selected={groupBy}
+          onChange={setGroupBy}
+        />
+        <OrderPopover
+          anchorRef={orderPillRef}
+          open={orderPopOpen}
+          onClose={() => setOrderPopOpen(false)}
+          pipe={sortPipe}
+          onChange={(patch) => setPipes(prev => {
+            const idx = prev.findIndex(p => p.kind === 'sort')
+            if (idx === -1) return [...prev, newSortPipe({ field: '', dir: 'desc', ...patch })]
+            const next = [...prev]
+            next[idx] = { ...next[idx], ...patch }
+            return next
+          })}
+          onRemove={() => setPipes(prev => prev.filter(p => p.kind !== 'sort'))}
+          fieldOptions={orderFieldOptions}
+        />
+        <LimitPopover
+          anchorRef={limitPillRef}
+          open={limitPopOpen}
+          onClose={() => setLimitPopOpen(false)}
+          pipe={limitPipe}
+          onChange={(patch) => setPipes(prev => {
+            const idx = prev.findIndex(p => p.kind === 'limit')
+            if (idx === -1) return [...prev, newLimitPipe({ n: 100, ...patch })]
+            const next = [...prev]
+            next[idx] = { ...next[idx], ...patch }
+            return next
+          })}
+          onRemove={() => setPipes(prev => prev.filter(p => p.kind !== 'limit'))}
+        />
+        <MathPopover
+          anchorRef={mathPillRef}
+          open={mathPopOpen}
+          onClose={closeMath}
+          onSave={upsertMathPipe}
+          initial={editingMath}
+          availableNames={mathAvailableNames}
+        />
 
-        {chips.length > 0 && (
+        {composedQuery.length > 0 && (
           <div className="logs-query-preview">
-            <span className="qb-preview-label">Query</span>
-            <code className="qb-preview-code">{chipsToString(chips)}</code>
+            <span className="qb-preview-label">Generated Query</span>
+            <code className="qb-preview-code">{composedQuery}</code>
             <button
               type="button"
               className="qb-preview-copy"
-              onClick={() => { try { navigator.clipboard.writeText(chipsToString(chips)) } catch (_) {} }}
+              onClick={() => { try { navigator.clipboard.writeText(composedQuery) } catch (_) {} }}
               title="Copy query to clipboard"
               aria-label="Copy query"
             >
@@ -586,13 +1123,10 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 10a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 004 0"/><line x1="12" y1="2" x2="12" y2="4"/></svg>
             Alert
           </button>
-          <button className="hbtn small" title="Explore — advanced query mode (coming soon)" disabled>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-2 6-6 2 2-6z"/></svg>
-            Explore
-          </button>
           </div>
         </div>
 
+        {statsFunctions.length === 0 ? (<>
         {graphVisible && <div className="logs-volume">
           <div className="logs-volume-chart">
             {zoom && (
@@ -644,8 +1178,8 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             <span key={f} className="lh-extra">{f}</span>
           ))}
         </div>
-        <div className={`logs-stream-wrap${selected ? ' has-detail' : ''}`}>
-          <div className="logs-stream">
+        <div className="logs-stream-wrap">
+          <div className="logs-stream" data-log-content>
             {filtered.length === 0 && (
               <div className="err-empty">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
@@ -653,7 +1187,11 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
               </div>
             )}
             {filtered.map(l => (
-              <div key={l.id} className={`log-row${selectedId === l.id ? ' selected' : ''}`} onClick={() => setSelectedId(l.id)}>
+              <div
+                key={l.id}
+                className={`log-row${selectedId === l.id ? ' selected' : ''}`}
+                onClick={() => { if (window.getSelection()?.isCollapsed !== false) setSelectedId(l.id) }}
+              >
                 <div className="log-fixed-cols">
                   <span className={`log-lvl-bar log-lvl-${l.level}`} />
                   <span className="log-time">
@@ -663,47 +1201,112 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
                 </div>
                 <span className="log-text">{l.message}</span>
                 <span className="log-stream">
-                  <span className="log-tag"><span className="k">env</span><span className="v">{l.tags.env}</span></span>
-                  <span className="log-tag"><span className="k">log.level</span><span className="v">{l.level}</span></span>
-                  <span className="log-tag"><span className="k">service</span><span className="v">{l.service}</span></span>
+                  <span className="log-tag"><span className="k">env</span><span className="v" data-log-field="env" data-log-value={l.tags.env}>{l.tags.env}</span></span>
+                  <span className="log-tag"><span className="k">log.level</span><span className="v" data-log-field="log.level" data-log-value={l.level}>{l.level}</span></span>
+                  <span className="log-tag"><span className="k">service</span><span className="v" data-log-field="service" data-log-value={l.service}>{l.service}</span></span>
                 </span>
                 {[...activeFields].map(f => (
-                  <span key={f} className="log-extra mono">{l.tags[f] ?? l[f] ?? ''}</span>
+                  <span key={f} className="log-extra mono" data-log-field={f} data-log-value={l.tags[f] ?? l[f] ?? ''}>{l.tags[f] ?? l[f] ?? ''}</span>
                 ))}
               </div>
             ))}
           </div>
-
-          {selected && (
-            <aside className="log-detail">
-              <div className="log-detail-head">
-                <div>
-                  <div className="log-detail-title">Record</div>
-                  <div className="log-detail-sub mono">{selected.dateStr}T{selected.timeStr}Z</div>
-                </div>
-                <button className="log-detail-close" onClick={() => setSelectedId(null)} aria-label="Close">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-              </div>
-              <div className="log-detail-body">
-                <div className="log-detail-msg">
-                  <div className="log-detail-key">_msg</div>
-                  <div className="log-detail-val mono">{selected.message}</div>
-                </div>
-                {Object.entries(selected.tags).map(([k, v]) => (
-                  <div key={k} className="log-detail-field">
-                    <span className="log-detail-key">{k}</span>
-                    <span className="log-detail-val mono">{v}</span>
-                  </div>
-                ))}
-              </div>
-            </aside>
-          )}
         </div>
+        </>) : (
+          <AggregateResults result={aggregateResult} />
+        )}
+      </div>
+
+      {selected && (
+        <aside className="log-detail">
+          <div className="log-detail-head">
+            <div>
+              <div className="log-detail-title">Record</div>
+              <div className="log-detail-sub mono">{selected.dateStr}T{selected.timeStr}Z</div>
+            </div>
+            <button className="log-detail-close" onClick={() => setSelectedId(null)} aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div className="log-detail-body" data-log-content>
+            <div className="log-detail-msg">
+              <div className="log-detail-key">_msg</div>
+              <div className="log-detail-val mono">{selected.message}</div>
+            </div>
+            {Object.entries(selected.tags).map(([k, v]) => (
+              <div key={k} className="log-detail-field">
+                <span className="log-detail-key">{k}</span>
+                <span className="log-detail-val mono" data-log-field={k} data-log-value={v}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
       </div>
     </div>
     {alertOpen && <AlertDrawer filters={filters} query={query} onClose={() => setAlertOpen(false)} />}
     {patternsOpen && <PatternsDrawer onClose={() => setPatternsOpen(false)} />}
+    {historyOpen && <QueryHistoryDrawer onClose={() => setHistoryOpen(false)} onApply={(q) => { setQuery(q); setHistoryOpen(false) }} />}
+
+    {selMenu && (
+      <div className="log-sel-menu" style={{ left: selMenu.x, top: selMenu.y }}>
+        <button className="log-sel-item" onClick={() => applySelectionChip('include')}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Include in Query
+        </button>
+        <button className="log-sel-item" onClick={() => applySelectionChip('exclude')}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Exclude from Query
+        </button>
+        <button className="log-sel-item" onClick={copySelection}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          Copy Text
+        </button>
+        {selMenu.field && STREAM_DIST_FIELDS.has(selMenu.field) && (
+          <button className="log-sel-item" onClick={openDistribution}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            Show distribution
+          </button>
+        )}
+      </div>
+    )}
+
+    {distField && (() => {
+      const dist = computeDistribution(filtered, distField.field)
+      const width = 320
+      const left = Math.max(8, Math.min(distField.x, window.innerWidth - width - 8))
+      return (
+        <div className="log-dist-pop" style={{ left, top: distField.y, width }}>
+          <div className="log-dist-head">
+            <div className="log-dist-title">Distribution · <span className="mono">{distField.field}</span></div>
+            <button className="log-dist-close" onClick={() => setDistField(null)} aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div className="log-dist-sub">{dist.distinct} values · {dist.total.toLocaleString()} logs in view</div>
+          <div className="log-dist-list">
+            {dist.items.length === 0 && <div className="log-dist-empty">No values</div>}
+            {dist.items.map(([val, count]) => {
+              const pct = dist.total ? (count / dist.total) * 100 : 0
+              const color = distField.field === 'log.level' ? (DIST_BAR_COLOR[val] || 'var(--brand)') : 'var(--brand)'
+              return (
+                <button
+                  key={val}
+                  className="log-dist-row"
+                  onClick={() => { addChipToQuery({ field: distField.field, op: 'eq', value: val }); setDistField(null) }}
+                  title={`Include ${distField.field} = ${val}`}
+                >
+                  <span className="log-dist-val mono" title={val}>{val}</span>
+                  <span className="log-dist-bar-wrap"><span className="log-dist-bar" style={{ width: `${pct}%`, background: color }} /></span>
+                  <span className="log-dist-count mono">{count.toLocaleString()}</span>
+                  <span className="log-dist-pct mono">{pct.toFixed(1)}%</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )
+    })()}
     </>
   )
 }
