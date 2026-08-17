@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { FileText, Filter } from 'lucide-react'
-import { clsx } from 'clsx'
+import { Filter } from 'lucide-react'
 import Panel from '@/components/shared/Panel'
 import TabBar from '@/components/shared/TabBar'
 import { logs, LOG_LEVELS, LOG_LEVEL_COLORS } from '@/data/logs'

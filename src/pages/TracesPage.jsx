@@ -31,7 +31,7 @@ const TRACE_COLUMNS = [
     key: 'duration',
     label: 'Duration',
     align: 'right',
-    render: (val, row) => {
+    render: (val) => {
       const status = statusForLatency(val)
       return <span className={`status-${status} font-mono`}>{formatDuration(val)}</span>
     },

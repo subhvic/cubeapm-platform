@@ -17,9 +17,6 @@ export default function Sparkline({ data = [], color = '#3B82F6', height = 32 })
     return `${x},${y}`
   }).join(' ')
 
-  // Area fill path
-  const areaPath = `M0,${height} L${points.split(' ').map(p => p).join(' L')} L${width},${height} Z`
-
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}

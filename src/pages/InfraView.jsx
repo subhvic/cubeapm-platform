@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import {
-  INFRA_SOURCES, INFRA_SOURCE_INDEX, infraHosts, HOST_PROCESSES,
+  INFRA_SOURCE_INDEX, infraHosts, HOST_PROCESSES,
   k8sCpuAllocation, k8sMemAllocation, k8sContainersSeries, k8sClusterSummary, k8sNamespaceSummary, k8sDeploymentSummary,
   k8sNodes, k8sPods, K8S_NAMESPACES,
   mysqlSummary, mysqlSeries, redisSummary, redisSeries,
@@ -632,7 +632,7 @@ function K8sNamespaceGateView({ resourceLabel }) {
 
 /* ============ Generic empty state (AWS / GCP sub-services, disconnected KBs resources) ============ */
 
-function InfraEmptyView({ label, columns }) {
+function InfraEmptyView({ columns }) {
   return (
     <>
       <div className="infra-empty-charts">

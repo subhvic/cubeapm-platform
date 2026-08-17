@@ -44,8 +44,8 @@ function ChartTooltip({ active, payload, label }) {
 
 // ---------- Renderer ----------
 
-export default function AggregateResults({ result }) {
-  const { kind, series, groups, buckets, statsPipe, filteredCount, sortPipe, limitPipe } = result
+export default function AggregateResults({ result, graphVisible = true }) {
+  const { kind, series, buckets, statsPipe, filteredCount, sortPipe, limitPipe } = result
   const groupCount = statsPipe?.groupBy?.length || 0
   const fnCount = statsPipe?.functions?.length || 0
   const seriesCount = series.length
@@ -125,13 +125,13 @@ export default function AggregateResults({ result }) {
               </span>
             )}
           </div>
-          <div className="agg-kpi-spark">
+          {graphVisible && <div className="agg-kpi-spark">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
                 <Line type="monotone" dataKey="s0" stroke={palette(0)} strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
-          </div>
+          </div>}
         </div>
       </div>
     )
@@ -140,7 +140,7 @@ export default function AggregateResults({ result }) {
   // ---- Branch: line chart + table ----
   return (
     <div className="agg-panel">
-      <div className="agg-chart">
+      {graphVisible && <div className="agg-chart">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
@@ -178,9 +178,9 @@ export default function AggregateResults({ result }) {
             ))}
           </LineChart>
         </ResponsiveContainer>
-      </div>
+      </div>}
 
-      <div className="agg-legend-wrap">
+      {graphVisible && <div className="agg-legend-wrap">
         <div className="agg-legend">
           {series.slice(0, 16).map((s, i) => (
             <div key={s.key} className="agg-legend-row">
@@ -193,7 +193,7 @@ export default function AggregateResults({ result }) {
           ))}
           {series.length > 16 && <div className="agg-legend-more">+ {series.length - 16} more</div>}
         </div>
-      </div>
+      </div>}
 
       <div className="agg-table-wrap">
         <table className="agg-table">

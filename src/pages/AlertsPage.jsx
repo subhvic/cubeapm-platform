@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Bell, CheckCircle } from 'lucide-react'
 import { clsx } from 'clsx'
-import Panel from '@/components/shared/Panel'
 import TabBar from '@/components/shared/TabBar'
 import StatusBadge from '@/components/shared/StatusBadge'
 import { alerts, alertsSummary } from '@/data/alerts'

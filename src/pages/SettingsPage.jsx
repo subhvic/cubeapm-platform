@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Settings } from 'lucide-react'
 import TabBar from '@/components/shared/TabBar'
 import Panel from '@/components/shared/Panel'
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import HomeSkeleton from '@/pages/HomeSkeleton'
 import Walkthrough from '@/components/Walkthrough'
@@ -278,8 +278,6 @@ export default function App() {
     </div>
   )
 }
-
-const TIME_PRESETS = ['Last 5 minutes','Last 15 minutes','Last 30 minutes','Last 1 hour','Last 2 hours','Last 3 hours','Last 6 hours','Last 12 hours','Last 24 hours','Last 2 days','Last 3 days','Last 7 days','Today','Today so far']
 
 function SettingsDrawer({ view, serviceSubTab, serviceId, settingsTab, setSettingsTab, onClose, timeRange, hiddenNavItems, setHiddenNavItems }) {
   const isInfra = view === 'infra'
