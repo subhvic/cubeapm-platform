@@ -1003,7 +1003,7 @@ tbody tr:hover { background: var(--panel-2); }
 
 .logs-main { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-lg); display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
 .logs-main-body { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
-.logs-query-bar { display: flex; align-items: stretch; gap: 10px; padding: 10px 14px; }
+.logs-query-bar { display: flex; align-items: stretch; gap: 10px; padding: 10px 12px 10px 14px; }
 .logs-query-bar .hbtn { align-self: stretch; padding-top: 0; padding-bottom: 0; }
 
 /* Search / Aggregate mode toggle — segmented control at the start of the query bar */
@@ -1030,12 +1030,97 @@ tbody tr:hover { background: var(--panel-2); }
 .logs-return-hint { width: 13px; height: 13px; color: var(--text-muted); opacity: 0.55; flex-shrink: 0; }
 .logs-query-input:focus-within .logs-return-hint { opacity: 0.85; }
 
+/* ============ Query mode toggle ============
+   Occupies the leading slot of the query row where the magnifier used to be,
+   in both builder and raw mode so it never appears to move. */
+.qmode {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  border: 1px solid var(--border-subtle); border-radius: 4px;
+  padding: 0; gap: 1px; margin-right: 9px;
+}
+.qmode-seg {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; padding: 0; border: none; border-radius: 3px;
+  background: none; color: var(--text-muted); cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.qmode-seg:hover:not(:disabled) { color: var(--text-primary); background: var(--panel-2); }
+.qmode-seg.is-active { background: var(--brand-muted); color: var(--brand-on-muted); }
+.qmode-seg:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ============ Raw query input ============ */
+.rawq-wrap { position: relative; flex: 1; min-width: 0; }
+.rawq-row {
+  display: flex; align-items: center; gap: 5px;
+  background: transparent; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); padding: 3px 10px 3px 4px; min-height: 32px;
+  cursor: text; transition: border-color .12s;
+}
+.rawq-row:focus-within { border-color: var(--brand); }
+.rawq-row.is-error { border-color: var(--critical-fg); }
+.rawq-row .qmode { margin-top: 0; }
+.rawq-input {
+  flex: 1; min-width: 0; resize: none; overflow-y: auto;
+  background: none; border: none; outline: none; padding: 2px 0;
+  color: var(--text-primary); font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px; line-height: 1.5;
+}
+.rawq-input::placeholder { color: var(--text-muted); }
+.rawq-hint { color: var(--text-muted); opacity: .55; flex-shrink: 0; margin-top: 3px; display: inline-flex; }
+.rawq-row:focus-within .rawq-hint { opacity: .85; }
+
+.rawq-error {
+  display: flex; align-items: center; gap: 5px;
+  margin-top: 5px; font-size: 10.5px; color: var(--critical-fg);
+}
+.rawq-error svg { flex-shrink: 0; }
+
+.rawq-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 600;
+  max-height: 300px; overflow-y: auto;
+  background: var(--raised); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-dropdown);
+  padding: 4px 0;
+}
+.rawq-group + .rawq-group { border-top: 1px solid var(--border-subtle); margin-top: 3px; padding-top: 3px; }
+.rawq-group-lbl {
+  padding: 6px 12px 4px; font-size: 9.5px; font-weight: 600;
+  letter-spacing: .8px; text-transform: uppercase; color: var(--text-muted);
+}
+.rawq-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 5px 12px; background: none; border: none; color: var(--text-secondary);
+  font: inherit; font-size: 12px; cursor: pointer; text-align: left;
+}
+.rawq-item.is-active { background: var(--panel-2); color: var(--text-primary); }
+.rawq-item-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; flex-shrink: 0; border-radius: 3px;
+  background: var(--panel); color: var(--text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9.5px;
+}
+.rawq-item.is-active .rawq-item-badge { background: var(--brand-muted); color: var(--brand-on-muted); }
+.rawq-item-val { flex-shrink: 0; color: var(--text-primary); font-size: 11.5px; }
+.rawq-item-detail {
+  flex: 1; text-align: right; font-size: 10px; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rawq-foot {
+  border-top: 1px solid var(--border-subtle); margin-top: 3px; padding: 6px 12px 2px;
+  font-size: 9.5px; color: var(--text-muted); display: flex; gap: 5px; align-items: center;
+}
+.rawq-foot kbd {
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px;
+  background: var(--panel); border: 1px solid var(--border-subtle);
+  border-radius: 3px; padding: 1px 4px; color: var(--text-secondary);
+}
+
 /* ============ QueryBuilder (Use Case 1) ============ */
 .qb-wrap { position: relative; flex: 1; min-width: 0; }
 .qb-input-row {
   display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
   background: transparent; border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm); padding: 5px 10px; min-height: 32px;
+  border-radius: var(--radius-sm); padding: 3px 10px 3px 4px; min-height: 32px;
   cursor: text; transition: border-color .12s;
 }
 .qb-input-row:focus-within { border-color: var(--brand); }
@@ -1320,6 +1405,14 @@ tbody tr:hover { background: var(--panel-2); }
 .qb-ov-foot kbd + kbd { margin-left: 2px; }
 .hbtn:disabled { opacity: 0.38; cursor: not-allowed; }
 .hbtn.small { padding: 4px 10px; font-size: 10.5px; }
+
+/* Icon-only buttons in the query bar are square. aspect-ratio derives the
+   width from the stretched height so it stays square as the row grows, and
+   max-height stops it ballooning when chips wrap onto several lines. */
+.logs-query-bar .hbtn.icon-only {
+  aspect-ratio: 1 / 1; max-height: 44px;
+  padding: 0; justify-content: center;
+}
 .hbtn.small.icon-only { padding: 4px 7px; }
 .hbtn.small.icon-only svg { margin-right: 0; }
 
@@ -1997,6 +2090,39 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
   font-size: 10px; color: var(--brand); font-weight: 500;
 }
 .qh-item-saved svg { width: 11px; height: 11px; }
+
+/* Save/unsave toggle on a history row. Dimmed until hover so a long list
+   doesn't read as a column of icons, but always visible once saved. */
+.qh-save-btn {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; border-radius: 4px;
+  background: none; border: 1px solid transparent; color: var(--text-muted);
+  cursor: pointer; opacity: 0; transition: opacity .12s, color .12s, background .12s, border-color .12s;
+}
+.qh-item:hover .qh-save-btn,
+.qh-save-btn:focus-visible { opacity: 1; }
+.qh-save-btn:hover { background: var(--panel-2); border-color: var(--border-subtle); color: var(--text-primary); }
+.qh-save-btn.is-saved { opacity: 1; color: var(--brand); }
+.qh-save-btn.is-saved:hover { color: var(--brand); background: var(--brand-muted); border-color: rgba(59,130,246,.32); }
+.qh-save-btn svg { width: 13px; height: 13px; }
+
+.qh-save-form { display: flex; align-items: center; gap: 5px; margin-top: 7px; }
+.qh-save-input {
+  flex: 1; min-width: 0; background: var(--card); color: var(--text-primary);
+  border: 1px solid var(--brand); border-radius: 4px; padding: 4px 8px;
+  font-family: inherit; font-size: 11px; outline: none;
+}
+.qh-save-input::placeholder { color: var(--text-muted); }
+.qh-save-confirm {
+  flex-shrink: 0; background: var(--brand); border: 1px solid var(--brand); color: #fff;
+  border-radius: 4px; padding: 4px 10px; font-family: inherit; font-size: 11px; cursor: pointer;
+}
+.qh-save-confirm:hover { background: var(--brand-active, #2563EB); border-color: var(--brand-active, #2563EB); }
+.qh-save-cancel {
+  flex-shrink: 0; background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px;
+}
+.qh-save-cancel:hover { color: var(--text-primary); }
 .qh-item-actions { display: inline-flex; gap: 4px; }
 .qh-action-tag {
   font-size: 9.5px; color: var(--text-muted); background: var(--panel);

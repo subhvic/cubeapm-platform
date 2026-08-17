@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
-import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
+import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { services, paymentServiceSeries, latencyDrilldown, redEndpoints, infraCorrelation, slowRequests, externalEndpoints, dbEndpoints, slowQueries, errorGroups, tracesList, traceDetail, runtimeHosts, runtimeMetrics, FILTER_OPTS } from '@/data/services'
-import { statusForLatency, statusForErrorRate, statusColor } from '@/utils/status'
+import { statusForLatency, statusForErrorRate } from '@/utils/status'
 import PageBar from '@/components/layout/PageBar'
 
 const BASE_TIME = new Date()
@@ -71,7 +71,7 @@ function RedChartTooltip({ active, payload, label, eps, colors, fmtFn }) {
   )
 }
 
-function SparkChart({ series, color, incidentAt, unit = '', formatVal }) {
+function SparkChart({ series, color, unit = '', formatVal }) {
   const data = useMemo(() => chartData(series), [series])
   const gid = `sp_${color.replace('#', '')}`
   return (
@@ -148,8 +148,6 @@ function LatencyDrilldown() {
     })
     return entry
   }), [])
-
-  const incidentLabel = data[INCIDENT_IDX]?.label
 
   return (
     <div className="panel">
@@ -267,8 +265,6 @@ function RedTab() {
   const EP_COLORS = ['#3B82F6', '#34D399', '#F472B6', '#A78BFA']
   const eps = redEndpoints.slice(0, 4)
   const N2 = 30, INC2 = 18
-  const incidentMinsAgo = (N2 - 1 - INC2) * 2
-  const incidentLabel = `-${incidentMinsAgo}m`
 
   const makeRedChart = (title, valFn, fmtFn) => {
     const chartData2 = Array.from({ length: N2 }, (_, i) => {

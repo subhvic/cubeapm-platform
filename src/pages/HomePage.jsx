@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { services, serviceSummary, serviceEdges, externalDependencies, fleetSeries } from '@/data/services'
 import { statusForLatency, statusForErrorRate, statusColor } from '@/utils/status'
 import PageBar from '@/components/layout/PageBar'
@@ -29,7 +29,7 @@ function FleetTooltip({ active, payload, label, color, unit, formatVal }) {
   )
 }
 
-function FleetChart({ title, flag, flagType, value, unit, series, color, incidentAt, formatVal }) {
+function FleetChart({ title, flag, flagType, value, unit, series, color, formatVal }) {
   const data = useMemo(() => chartData(series), [series])
   const gid = `fg_${title.replace(/\s/g, '')}`
   return (

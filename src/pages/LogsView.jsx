@@ -1,18 +1,21 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, ResponsiveContainer } from 'recharts'
-import { logRows, logVolume, logFacets, logTotals, BASE_TIME } from '@/data/observability'
+import { logRows, logVolume, logFacets, BASE_TIME } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
 import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue } from '@/components/QueryBuilder'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
-import { composeQuery, newStatsPipe, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
+import { composeQuery, serializePipes, newStatsPipe, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
+import { tryParseConditions, splitQuery, replacePipeSection, validatePipeText } from '@/utils/rawQuery'
+import QueryModeToggle from '@/components/QueryModeToggle'
+import RawQueryInput from '@/components/RawQueryInput'
 import PipePill, { PipePillChip } from '@/components/PipePill'
 import AggregationPopover from '@/components/AggregationPopover'
 import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, FileText } from 'lucide-react'
 
 const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
 const AGG_NUMERIC_FIELDS = new Set(FIELD_CATALOG.filter(f => f.type === 'keyword').map(f => f.field))
@@ -180,14 +183,31 @@ function formatHistoryTime(d) {
   return `${Math.floor(diff / 86400000)}d ago`
 }
 
-function QueryHistoryDrawer({ onClose, onApply }) {
+// `savedNames` maps history id → saved name (or null). It's owned by LogsView so
+// a save survives closing the drawer; QUERY_HISTORY only seeds the initial values.
+function QueryHistoryDrawer({ onClose, onApply, savedNames, onToggleSave }) {
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState('all')
+  // id currently being named, plus the in-progress text. null = nobody naming.
+  const [naming, setNaming] = useState(null)
+  const [namingText, setNamingText] = useState('')
+
+  const savedNameFor = (h) => savedNames?.[h.id] ?? null
+
   const items = QUERY_HISTORY.filter(h => {
-    if (tab === 'saved' && !h.saved) return false
-    if (search && !h.query.toLowerCase().includes(search.toLowerCase()) && !(h.saved && h.saved.toLowerCase().includes(search.toLowerCase()))) return false
+    const saved = savedNameFor(h)
+    if (tab === 'saved' && !saved) return false
+    if (search && !h.query.toLowerCase().includes(search.toLowerCase()) && !(saved && saved.toLowerCase().includes(search.toLowerCase()))) return false
     return true
   })
+
+  const beginSave = (h) => { setNaming(h.id); setNamingText('') }
+  const commitSave = (h) => {
+    // An empty name still saves — the query itself is the fallback label.
+    onToggleSave(h.id, namingText.trim() || h.query)
+    setNaming(null)
+    setNamingText('')
+  }
   return (
     <div className="alert-drawer-overlay" onClick={onClose}>
       <aside className="alert-drawer qh-drawer" onClick={e => e.stopPropagation()}>
@@ -214,28 +234,68 @@ function QueryHistoryDrawer({ onClose, onApply }) {
           {items.length === 0 && (
             <div className="qh-empty">No queries match your search</div>
           )}
-          {items.map(h => (
-            <div key={h.id} className="qh-item" onClick={() => onApply(h.query)}>
-              <div className="qh-item-top">
-                <code className="qh-item-query">{h.query}</code>
-                <span className="qh-item-time">{formatHistoryTime(h.time)}</span>
-              </div>
-              <div className="qh-item-meta">
-                <span className="qh-item-results">{h.results.toLocaleString()} results</span>
-                {h.saved && (
-                  <span className="qh-item-saved">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
-                    {h.saved}
-                  </span>
+          {items.map(h => {
+            const saved = savedNameFor(h)
+            const isNaming = naming === h.id
+            return (
+              <div key={h.id} className="qh-item" onClick={() => onApply(h.query)}>
+                <div className="qh-item-top">
+                  <code className="qh-item-query">{h.query}</code>
+                  <span className="qh-item-time">{formatHistoryTime(h.time)}</span>
+                  {/* Row click applies the query, so every control here stops
+                      propagation or the drawer would close underneath it. */}
+                  <button
+                    type="button"
+                    className={`qh-save-btn${saved ? ' is-saved' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (saved) onToggleSave(h.id, null)
+                      else beginSave(h)
+                    }}
+                    title={saved ? `Unsave "${saved}"` : 'Save this query'}
+                    aria-label={saved ? `Unsave ${saved}` : 'Save this query'}
+                    aria-pressed={!!saved}
+                  >
+                    <svg viewBox="0 0 24 24" fill={saved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+                  </button>
+                </div>
+
+                {isNaming && (
+                  <form
+                    className="qh-save-form"
+                    onClick={(e) => e.stopPropagation()}
+                    onSubmit={(e) => { e.preventDefault(); commitSave(h) }}
+                  >
+                    <input
+                      autoFocus
+                      className="qh-save-input"
+                      placeholder="Name this query…"
+                      value={namingText}
+                      onChange={(e) => setNamingText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setNaming(null) } }}
+                    />
+                    <button type="submit" className="qh-save-confirm">Save</button>
+                    <button type="button" className="qh-save-cancel" onClick={() => setNaming(null)} aria-label="Cancel">×</button>
+                  </form>
                 )}
-                {h.actions.length > 0 && (
-                  <span className="qh-item-actions">
-                    {h.actions.map(a => <span key={a} className="qh-action-tag">{a}</span>)}
-                  </span>
-                )}
+
+                <div className="qh-item-meta">
+                  <span className="qh-item-results">{h.results.toLocaleString()} results</span>
+                  {saved && (
+                    <span className="qh-item-saved">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+                      {saved}
+                    </span>
+                  )}
+                  {h.actions.length > 0 && (
+                    <span className="qh-item-actions">
+                      {h.actions.map(a => <span key={a} className="qh-action-tag">{a}</span>)}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </aside>
     </div>
@@ -416,6 +476,32 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   }, [])
   const [live, setLive] = useState('off')
   const [pipes, setPipes] = useState([])         // populated by the pill toolbar
+  // 'builder' = chip UI, 'raw' = hand-written CubeAPM syntax. The pill toolbar
+  // stays live in both; in raw mode its edits rewrite the pipe section of the
+  // raw text rather than feeding a separate preview.
+  const [queryMode, setQueryMode] = useState('builder')
+  const [rawText, setRawText] = useState('')
+
+  // In raw mode the text is the source of truth for filtering, so parse its
+  // conditions head back into chips and surface any failure under the input.
+  const rawParse = useMemo(() => {
+    if (queryMode !== 'raw') return { ok: true, chips: [], error: null }
+    const { conditions, pipes: pipeStages } = splitQuery(rawText)
+    const parsed = tryParseConditions(conditions)
+    if (!parsed.ok) return parsed
+    const pipeErr = validatePipeText(pipeStages)
+    return pipeErr ? { ok: false, chips: [], error: pipeErr } : parsed
+  }, [queryMode, rawText])
+
+  // Whichever mode is active supplies the chips that actually filter rows.
+  // While raw text is mid-edit it spends most keystrokes in an unparseable
+  // state; filtering on that would blow the result set away on every typo, so
+  // the last good parse is held until a new one succeeds.
+  const lastGoodChips = useRef([])
+  if (queryMode === 'raw' && rawParse.ok) lastGoodChips.current = rawParse.chips
+  const effectiveChips = queryMode === 'raw'
+    ? (rawParse.ok ? rawParse.chips : lastGoodChips.current)
+    : chips
   const aggPillRef = useRef(null)
   const [aggPopOpen, setAggPopOpen] = useState(false)
   const [editingFuncId, setEditingFuncId] = useState(null)   // null = create mode
@@ -567,16 +653,29 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // Saved names for history rows, keyed by id and seeded from the mock history.
+  // Lives here rather than in the drawer so a save outlives closing it.
+  const [historySaved, setHistorySaved] = useState(
+    () => Object.fromEntries(QUERY_HISTORY.map(h => [h.id, h.saved]))
+  )
+  const toggleHistorySave = useCallback((id, name) => {
+    setHistorySaved(prev => ({ ...prev, [id]: name }))
+  }, [])
   const [userSavedQueries, setUserSavedQueries] = useState([])
   const [savingName, setSavingName] = useState(null) // null = idle | string = editing name
   const [justSaved, setJustSaved] = useState(false)
+  // Saves whichever chip set is currently driving results, so this stays
+  // correct if the save affordance is ever surfaced in raw mode too.
   const saveCurrentQuery = useCallback((name) => {
-    if (!name.trim() || chips.length === 0) return
-    setUserSavedQueries(prev => [{ name: name.trim(), chips: [...chips] }, ...prev.filter(s => s.name !== name.trim())])
+    if (!name.trim() || effectiveChips.length === 0) return
+    setUserSavedQueries(prev => [
+      { name: name.trim(), chips: [...effectiveChips] },
+      ...prev.filter(s => s.name !== name.trim()),
+    ])
     setJustSaved(true)
     const timer = setTimeout(() => setJustSaved(false), 2000)
     return () => clearTimeout(timer)
-  }, [chips])
+  }, [effectiveChips])
   const [zoom, setZoom] = useState(null)
   const [dragBrush, setDragBrush] = useState(null)
   // Text-selection context menu: { x, y, text, field, value } | null
@@ -682,7 +781,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   useEffect(() => {
     const onUp = () => {
       if (!brushStartRef.current) return
-      const startLabel = brushStartRef.current
       brushStartRef.current = null
       setDragBrush(prev => {
         if (prev && prev.s1 !== prev.s2) {
@@ -750,15 +848,59 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       if (query && !l.message.toLowerCase().includes(query.toLowerCase())) return false
       if (lvlSet.size && !lvlSet.has(l.level)) return false
       if (svcSet.size && !svcSet.has(l.service)) return false
-      if (chips.length && !applyChipsToLog(l, chips)) return false
+      if (effectiveChips.length && !applyChipsToLog(l, effectiveChips)) return false
       return true
     })
-  }, [filters, query, chips])
+  }, [filters, query, effectiveChips])
 
   // The composed query string — chips + serialized pipes. Kept as one memo
   // so the preview visibility check and the copy-to-clipboard action stay
-  // in sync (both hide when the query is effectively empty).
-  const composedQuery = useMemo(() => composeQuery(chipsToString(chips), pipes), [chips, pipes])
+  // in sync (both hide when the query is effectively empty). In raw mode the
+  // user's own text is already the query, so there's nothing to compose.
+  const composedQuery = useMemo(
+    () => (queryMode === 'raw' ? rawText.trim() : composeQuery(chipsToString(chips), pipes)),
+    [queryMode, rawText, chips, pipes]
+  )
+
+  // Pill edits in raw mode rewrite only the pipe section, leaving the
+  // hand-written conditions head untouched. Writing the same string back is a
+  // no-op for React, so this can't feed back into itself.
+  useEffect(() => {
+    if (queryMode !== 'raw') return
+    setRawText(prev => replacePipeSection(prev, serializePipes(pipes)))
+  }, [pipes, queryMode])
+
+  // Returning to the chip builder is only possible when the raw conditions are
+  // expressible as chips — parenthesised groups and NOT have no chip form. The
+  // toggle disables that direction and explains why rather than dropping filters.
+  const builderBlockedReason = useMemo(() => {
+    if (queryMode !== 'raw') return null
+    const parsed = tryParseConditions(splitQuery(rawText).conditions)
+    return parsed.ok ? null : `Can't switch back: ${parsed.error}`
+  }, [queryMode, rawText])
+
+  // Switching modes carries the query across rather than resetting it.
+  const switchMode = useCallback((next) => {
+    if (next === queryMode) return
+    if (next === 'raw') {
+      setRawText(composeQuery(chipsToString(chips), pipes))
+    } else {
+      // Only offered when the raw text parses — see the toggle's disabled state.
+      const parsed = tryParseConditions(splitQuery(rawText).conditions)
+      if (!parsed.ok) return
+      setChips(parsed.chips)
+    }
+    setQueryMode(next)
+  }, [queryMode, chips, pipes, rawText])
+
+  const modeToggle = (
+    <QueryModeToggle
+      mode={queryMode}
+      onChange={switchMode}
+      disabled={!!builderBlockedReason}
+      disabledReason={builderBlockedReason}
+    />
+  )
 
   // Run the client-side aggregator whenever chips or pipes change. Anchors
    // to BASE_TIME so the mock stream (which is deterministic from BASE_TIME
@@ -777,7 +919,10 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   // When filters are active each level's bar shrinks proportionally to how many
   // rows in that minute match the filter, keeping the production-like visual shape.
   const filteredVolume = useMemo(() => {
-    const hasFilters = chips.length > 0 || !!query || Object.values(filters).some(s => s?.size)
+    // effectiveChips, not chips — in raw mode the active filter comes from the
+    // parsed raw text and `chips` is empty, which would short-circuit to the
+    // unfiltered baseline and desync the chart from the table.
+    const hasFilters = effectiveChips.length > 0 || !!query || Object.values(filters).some(s => s?.size)
     if (!hasFilters) return logVolume
 
     const now = BASE_TIME.getTime()
@@ -801,7 +946,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       const error = all.error > 0 ? Math.round(d.error * filt.error / all.error) : 0
       return { ...d, info, warn, error, total: info + warn + error }
     })
-  }, [chipFilteredRows, filters, query, chips])
+  }, [chipFilteredRows, filters, query, effectiveChips])
 
   const filtered = useMemo(() => {
     let rows = chipFilteredRows
@@ -865,14 +1010,30 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       <div className="logs-main">
       <div className="logs-main-body">
         <div className="logs-query-bar">
-          <QueryBuilder
-            chips={chips}
-            setChips={setChips}
-            recents={recents}
-            addRecent={addRecent}
-            savedQueries={userSavedQueries}
-            onRun={() => { /* results already reactive; kept as an explicit signal */ }}
-          />
+          {queryMode === 'raw' ? (
+            <RawQueryInput
+              value={rawText}
+              onChange={setRawText}
+              error={rawParse.error}
+              onSubmit={() => addRecent(rawParse.chips)}
+              leading={modeToggle}
+            />
+          ) : (
+            <QueryBuilder
+              chips={chips}
+              setChips={setChips}
+              recents={recents}
+              addRecent={addRecent}
+              savedQueries={userSavedQueries}
+              onRun={() => { /* results already reactive; kept as an explicit signal */ }}
+              leading={modeToggle}
+            />
+          )}
+          {queryMode === 'raw' && (
+            <a className="hbtn small icon-only" title="See documentation for Querying" aria-label="See documentation for Querying" href="https://docs.cubeapm.com/logs/querying" target="_blank" rel="noopener noreferrer">
+              <FileText size={16} strokeWidth={2} />
+            </a>
+          )}
           <button className="hbtn small icon-only" title="Query history" aria-label="Query history" onClick={() => setHistoryOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
           </button>
@@ -915,6 +1076,28 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
               </PipePillChip>
             ))}
           </PipePill>
+          {/* Math sits next to Aggregation because its expressions operate on
+              the aggregation's output names — Order and Limit act on the result
+              set afterwards, so they read better downstream of it. */}
+          <PipePill
+            ref={mathPillRef}
+            icon={<Calculator />}
+            label="Math"
+            active={mathPopOpen && !editingMathId}
+            onAddClick={openCreateMath}
+          >
+            {mathPipes.length > 0 && mathPipes.map(mp => (
+              <PipePillChip
+                key={mp.id}
+                title={mp.expression + (mp.as ? ` as ${mp.as}` : '')}
+                active={editingMathId === mp.id && mathPopOpen}
+                onClick={() => openEditMath(mp.id)}
+                onRemove={() => removePipeById(mp.id)}
+              >
+                {mp.as || mp.expression || 'expr'}
+              </PipePillChip>
+            ))}
+          </PipePill>
           <PipePill
             ref={orderPillRef}
             icon={<ArrowUpDown />}
@@ -950,25 +1133,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
                 {Number(limitPipe.n).toLocaleString()}
               </PipePillChip>
             )}
-          </PipePill>
-          <PipePill
-            ref={mathPillRef}
-            icon={<Calculator />}
-            label="Math"
-            active={mathPopOpen && !editingMathId}
-            onAddClick={openCreateMath}
-          >
-            {mathPipes.length > 0 && mathPipes.map(mp => (
-              <PipePillChip
-                key={mp.id}
-                title={mp.expression + (mp.as ? ` as ${mp.as}` : '')}
-                active={editingMathId === mp.id && mathPopOpen}
-                onClick={() => openEditMath(mp.id)}
-                onRemove={() => removePipeById(mp.id)}
-              >
-                {mp.as || mp.expression || 'expr'}
-              </PipePillChip>
-            ))}
           </PipePill>
           <button
             className="hbtn primary run-btn"
@@ -1035,7 +1199,9 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           availableNames={mathAvailableNames}
         />
 
-        {composedQuery.length > 0 && (
+        {/* Raw mode has no generated-query strip: the input itself already
+            shows the exact query, so a read-only echo of it is pure noise. */}
+        {queryMode === 'builder' && composedQuery.length > 0 && (
           <div className="logs-query-preview">
             <span className="qb-preview-label">Generated Query</span>
             <code className="qb-preview-code">{composedQuery}</code>
@@ -1213,7 +1379,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           </div>
         </div>
         </>) : (
-          <AggregateResults result={aggregateResult} />
+          <AggregateResults result={aggregateResult} graphVisible={graphVisible} />
         )}
       </div>
 
@@ -1246,7 +1412,14 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     </div>
     {alertOpen && <AlertDrawer filters={filters} query={query} onClose={() => setAlertOpen(false)} />}
     {patternsOpen && <PatternsDrawer onClose={() => setPatternsOpen(false)} />}
-    {historyOpen && <QueryHistoryDrawer onClose={() => setHistoryOpen(false)} onApply={(q) => { setQuery(q); setHistoryOpen(false) }} />}
+    {historyOpen && (
+      <QueryHistoryDrawer
+        onClose={() => setHistoryOpen(false)}
+        onApply={(q) => { setQuery(q); setHistoryOpen(false) }}
+        savedNames={historySaved}
+        onToggleSave={toggleHistorySave}
+      />
+    )}
 
     {selMenu && (
       <div className="log-sel-menu" style={{ left: selMenu.x, top: selMenu.y }}>

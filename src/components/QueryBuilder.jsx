@@ -254,7 +254,7 @@ export function applyChipsToLog(log, chips) {
 
 // ---------- Component ----------
 
-export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun }) {
+export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, leading }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   // null → field phase | { field, type, highCard } → operator phase | { …, op } → value phase
@@ -515,9 +515,13 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   return (
     <div className="qb-wrap" ref={wrapRef}>
       <div className="qb-input-row" onClick={() => inputRef.current?.focus()}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-          <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
-        </svg>
+        {/* Leading slot — the mode toggle lives here in place of the magnifier.
+            Falls back to the icon when no toggle is supplied. */}
+        {leading ?? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+          </svg>
+        )}
 
         {chips.map((c, i) => (
           <Fragment key={`chip${i}`}>

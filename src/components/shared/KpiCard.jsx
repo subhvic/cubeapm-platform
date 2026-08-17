@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { statusColor, statusForLatency, statusForErrorRate, STATUS_LABELS } from '@/utils/status'
+import { statusColor, STATUS_LABELS } from '@/utils/status'
 import Sparkline from '@/components/charts/Sparkline'
 
 /**

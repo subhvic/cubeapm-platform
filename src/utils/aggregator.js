@@ -7,8 +7,6 @@
 // stats/math query is submitted from Explore. Kept intentionally faithful
 // to the docs so swapping to a real API surface is a one-liner.
 
-import { STAT_FN_BY_NAME } from './pipes'
-
 // ---------- Stats function implementations ----------
 
 function toNumber(v) {

@@ -1,5 +1,3 @@
-import { statusForLatency } from '@/utils/status'
-
 export const BASE_TIME = new Date()
 
 const seededRnd = seed => {
@@ -9,7 +7,6 @@ const seededRnd = seed => {
 
 /* ============ LOGS ============ */
 
-const LOG_LEVELS = ['error', 'warn', 'info']
 const LOG_SERVICES = ['order', 'payment', 'shipment', 'search']
 
 const SVC_ENDPOINT = { order: '/v1/order', payment: '/v1/payment', shipment: '/v1/shipment', search: '/v1/search' }
