@@ -1521,8 +1521,8 @@ tbody tr:hover { background: var(--panel-2); }
    width from the stretched height so it stays square as the row grows, and
    max-height stops it ballooning when chips wrap onto several lines. */
 .logs-query-bar .hbtn.icon-only {
-  aspect-ratio: 1 / 1; max-height: 44px;
-  padding: 0; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0;
+  padding: 0; justify-content: center; align-self: flex-start;
 }
 .hbtn.small.icon-only { padding: 4px 7px; }
 .hbtn.small.icon-only svg { margin-right: 0; }
