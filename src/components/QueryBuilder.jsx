@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { AlertCircle } from 'lucide-react'
 import { logRows } from '@/data/observability'
 
 // ---------- Field catalog ----------
@@ -78,23 +79,34 @@ function asArray(v) {
   return [v]
 }
 
-function opValueText(op, value) {
-  const v = value ?? ''
+// Splits the op+value tail into separately addressable pieces, so each part of a
+// chip can be clicked to edit just that part. The punctuation (prefix/suffix) is
+// the operator; whatever sits between them is the value.
+function chipSegments(op, value) {
+  const v = String(value ?? '')
+  const list = () => asArray(value).map(x => `"${x}"`).join(', ')
   switch (op) {
-    case 'exists':   return ':*'
-    case 'empty':    return ':""'
-    case 'word':     return `:${v}`
-    case 'eq':       return `:=${v}`
-    case 'neq':      return `!=${v}`
-    case 'in':       return ` in (${asArray(value).map(x => `"${x}"`).join(', ')})`
-    case 'not_in':   return ` not_in (${asArray(value).map(x => `"${x}"`).join(', ')})`
-    case 'contains': return `:*${v}*`
-    case 'prefix':   return `:${v}*`
-    case 'phrase':   return `:"${v}"`
-    case 'regex':    return `:~"${v}"`
-    case 'nregex':   return `!~"${v}"`
-    default:         return `:${v}`
+    case 'exists':   return { prefix: ':*',       value: '',      suffix: '' }
+    case 'empty':    return { prefix: ':""',      value: '',      suffix: '' }
+    case 'word':     return { prefix: ':',        value: v,       suffix: '' }
+    case 'eq':       return { prefix: ':=',       value: v,       suffix: '' }
+    case 'neq':      return { prefix: '!=',       value: v,       suffix: '' }
+    case 'in':       return { prefix: ' in (',    value: list(),  suffix: ')' }
+    case 'not_in':   return { prefix: ' not_in (', value: list(), suffix: ')' }
+    case 'contains': return { prefix: ':*',       value: v,       suffix: '*' }
+    case 'prefix':   return { prefix: ':',        value: v,       suffix: '*' }
+    case 'phrase':   return { prefix: ':"',       value: v,       suffix: '"' }
+    case 'regex':    return { prefix: ':~"',      value: v,       suffix: '"' }
+    case 'nregex':   return { prefix: '!~"',      value: v,       suffix: '"' }
+    default:         return { prefix: ':',        value: v,       suffix: '' }
   }
+}
+
+// Canonical CubeAPM syntax for a chip's tail — derived from the segments so the
+// rendered chip and the generated query can never drift apart.
+function opValueText(op, value) {
+  const s = chipSegments(op, value)
+  return s.prefix + s.value + s.suffix
 }
 
 // Renders just the operator prefix for the composing chip (before user picks a value).
@@ -254,7 +266,7 @@ export function applyChipsToLog(log, chips) {
 
 // ---------- Component ----------
 
-export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, leading }) {
+export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onComposingChange, leading }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   // null → field phase | { field, type, highCard } → operator phase | { …, op } → value phase
@@ -262,15 +274,27 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   const [highlight, setHighlight] = useState(0)
   // Selected values while composing a multi-value chip (in / not_in)
   const [pendingValues, setPendingValues] = useState([])
+  // Index of the chip being re-opened for editing, or null when composing a new
+  // one. The chip itself stays in `chips` the whole time — this only redirects
+  // rendering and the eventual commit — so abandoning an edit reverts for free.
+  const [editingIndex, setEditingIndex] = useState(null)
   const wrapRef = useRef(null)
   const inputRef = useRef(null)
   const listRef = useRef(null)
 
   const phase = !composing ? 'field' : composing.op == null ? 'operator' : 'value'
+  const isEditing = editingIndex != null
 
   const closeOverlay = useCallback(() => {
     setOpen(false)
     setHighlight(0)
+    // Dropping out of an edit discards the in-progress changes and restores the
+    // original chip. A new-chip trip keeps its composing state instead, so it can
+    // surface the "unfinished filter" error.
+    setEditingIndex(prev => {
+      if (prev != null) { setComposing(null); setText('') }
+      return null
+    })
   }, [])
 
   // Whether the value phase needs a typed value instead of a picklist
@@ -279,9 +303,20 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   const needsTypedValue = !!(!isMulti && (composing?.highCard || opMeta?.freeText))
 
   // Reset pending selections whenever we (re)enter a multi-value composing session.
+  // Editing is exempt: beginEdit seeds pendingValues from the chip being edited,
+  // and this would immediately wipe that seed.
   useEffect(() => {
-    if (isMulti) setPendingValues([])
-  }, [isMulti, composing?.field, composing?.op])
+    if (isMulti && !isEditing) setPendingValues([])
+  }, [isMulti, isEditing, composing?.field, composing?.op])
+
+  // Surface "there's an uncommitted filter in progress" upward so the parent can
+  // reflect it on the Run button. A trip is incomplete until it commits to a chip
+  // (composing → null) or is cancelled. Always clear on unmount (e.g. switching
+  // away from builder mode) so a stale signal doesn't linger.
+  // Only a *new* half-built chip blocks Run. An in-flight edit doesn't: the
+  // original chip is still in `chips` and still valid, so the query is runnable.
+  useEffect(() => { onComposingChange?.(!!composing && !isEditing) }, [composing, isEditing, onComposingChange])
+  useEffect(() => () => onComposingChange?.(false), [onComposingChange])
 
   const suggestions = useMemo(() => {
     const q = text.trim().toLowerCase()
@@ -327,13 +362,24 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     const fac = FIELD_CATALOG.filter(f =>
       !q || f.field.toLowerCase().includes(q) || f.desc.toLowerCase().includes(q)
     )
-    return { mode: 'fields', recents: rec, saved: sav, facets: fac }
+    // Anything typed that isn't itself a field name can be searched against the
+    // log body instead. When no field matches, that's the only sensible reading
+    // of the input, so the row leads the list and Enter takes it by default;
+    // otherwise it sits behind the field matches as a deliberate second choice.
+    const typed = text.trim()
+    const isFieldName = FIELD_CATALOG.some(f => f.field.toLowerCase() === q)
+    const freeText = typed && !isFieldName ? typed : null
+    return { mode: 'fields', recents: rec, saved: sav, facets: fac, freeText, freeTextFirst: fac.length === 0 }
   }, [text, phase, composing, needsTypedValue, recents, savedQueries])
 
   const flatItems = useMemo(() => {
     if (suggestions.mode === 'fields') {
+      // Mirrors the section order rendered below — keyboard index must track it.
+      const ft = suggestions.freeText ? [{ kind: 'freetext', payload: suggestions.freeText, key: 'ft' }] : []
+      const fac = suggestions.facets.map((f, i) => ({ kind: 'facet', payload: f, key: `f${i}` }))
       return [
-        ...suggestions.facets.map((f, i) => ({ kind: 'facet', payload: f, key: `f${i}` })),
+        ...(suggestions.freeTextFirst ? ft : fac),
+        ...(suggestions.freeTextFirst ? fac : ft),
         ...suggestions.recents.map((r, i) => ({ kind: 'recent', payload: r, key: `r${i}` })),
         ...suggestions.saved.map((s, i) => ({ kind: 'saved', payload: s, key: `s${i}` })),
       ]
@@ -368,12 +414,61 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   const applyChipSet = (nextChips) => {
     setChips(nextChips)
     setComposing(null)
+    setEditingIndex(null)
     setText('')
     closeOverlay()
     addRecent?.(nextChips)
   }
 
+  // Re-opens an existing chip for editing, at whichever part was clicked:
+  // 'field' re-picks the whole thing, 'operator' keeps the field, 'value' keeps
+  // both. Backspace still steps back from wherever you land.
+  const beginEdit = (i, target, e) => {
+    e?.stopPropagation()
+    const c = chips[i]
+    if (!c) return
+    const meta = FIELD_BY_NAME[c.field]
+    const om = opMetaFor(c.field, c.op)
+    setEditingIndex(i)
+    setHighlight(0)
+    setOpen(true)
+
+    if (target === 'field') {
+      // Nothing survives a field change — the old operator and value belong to
+      // the old field, so start the trip from scratch.
+      setComposing(null)
+      setPendingValues([])
+      setText('')
+    } else if (target === 'operator') {
+      setComposing({ field: c.field, type: meta?.type ?? 'string', highCard: !!meta?.highCard })
+      // Carry the value across so switching e.g. `is exactly` → `in (list)`
+      // keeps what was already there instead of starting empty.
+      setPendingValues(asArray(c.value).map(String))
+      setText('')
+    } else {
+      setComposing({ field: c.field, type: meta?.type ?? 'string', highCard: !!meta?.highCard, op: c.op })
+      setPendingValues(om?.multi ? asArray(c.value).map(String) : [])
+      // Seed the input only where the value is typed rather than picked; a picklist
+      // wants an unfiltered list, not one pre-narrowed to the current value.
+      const typedSeed = !om?.multi && (meta?.highCard || om?.freeText)
+      setText(typedSeed ? String(c.value ?? '') : '')
+    }
+    inputRef.current?.focus()
+  }
+
   const commitChip = (chip) => {
+    if (isEditing) {
+      const next = [...chips]
+      // Preserve the connector — editing a filter's content shouldn't silently
+      // change how it joins to its neighbours.
+      next[editingIndex] = { ...chip, connector: chips[editingIndex]?.connector }
+      setChips(next)
+      setComposing(null)
+      setEditingIndex(null)
+      setText('')
+      inputRef.current?.focus()
+      return
+    }
     const withConnector = chips.length === 0 ? chip : { connector: 'AND', ...chip }
     setChips([...chips, withConnector])
     setComposing(null)
@@ -383,6 +478,12 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
 
   const commitItem = (item) => {
     if (!item) return
+    // Free text commits straight to a chip — no operator/value phases, since the
+    // field (_msg) and operator (contains) are both implied by the intent.
+    if (item.kind === 'freetext') {
+      commitChip({ field: '_msg', op: 'contains', value: item.payload })
+      return
+    }
     if (item.kind === 'facet') {
       const f = item.payload
       setComposing({ field: f.field, type: f.type, highCard: !!f.highCard })
@@ -423,13 +524,23 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     commitChip({ field: composing.field, op: composing.op, value: pendingValues })
   }
 
+  // Abandon the in-progress trip entirely (the composing chip's × button).
+  const cancelComposing = useCallback(() => {
+    setComposing(null)
+    setEditingIndex(null)
+    setText('')
+    setPendingValues([])
+  }, [])
+
   const stepBack = () => {
     if (!composing) {
       if (chips.length) setChips(chips.slice(0, -1))
       return
     }
     if (composing.op != null) setComposing({ ...composing, op: undefined })
-    else setComposing(null)
+    // Stepping past the field ends the trip; for an edit that means abandoning
+    // it, which restores the untouched original.
+    else { setComposing(null); setEditingIndex(null) }
   }
 
   const onKeyDown = (e) => {
@@ -471,6 +582,18 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     }
   }
 
+  // Resets the whole bar, not just the committed chips — leaving a half-built
+  // filter or stray text behind after "clear everything" would be surprising.
+  const clearAll = (e) => {
+    e?.stopPropagation()
+    setChips([])
+    setComposing(null)
+    setEditingIndex(null)
+    setPendingValues([])
+    setText('')
+    inputRef.current?.focus()
+  }
+
   const removeChip = (idx, e) => {
     e?.stopPropagation()
     const next = chips.filter((_, i) => i !== idx)
@@ -507,10 +630,64 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
           ? `Pick values — Tab to commit ${pendingValues.length ? `(${pendingValues.length} selected)` : ''}`
           : needsTypedValue
             ? typedValuePlaceholder(composing.op, composing.field)
-            : `Search values for ${composing.field}…`)
-      : chips.length
-        ? 'Add another filter'
-        : 'Type a field name (e.g. service, duration_ms) or free text'
+            : isEditing
+              ? `Pick a new value for ${composing.field} — Esc to cancel`
+              : `Search values for ${composing.field}…`)
+      : isEditing
+        ? 'Pick a replacement field — Esc to cancel'
+        : chips.length
+          ? 'Add another filter'
+          : 'Type a field name (e.g. service, duration_ms) or free text'
+
+  // Rendered either above or below the facet list depending on freeTextFirst, so
+  // it's built once here rather than duplicated at both call sites.
+  const freeTextSection = suggestions.mode === 'fields' && suggestions.freeText ? (() => {
+    const idx = flatItems.findIndex(x => x.key === 'ft')
+    return (
+      <Section label="Free Text Search" meta="Log message">
+        <Row icon="⌕" active={idx === highlight}
+          onHover={() => setHighlight(idx)} onPick={() => commitItem(flatItems[idx])}
+          label={<>
+            <span className="qb-ov-name">Search logs for “{suggestions.freeText}”</span>
+            <span className="qb-ov-preview mono">_msg:*{suggestions.freeText}*</span>
+          </>} />
+      </Section>
+    )
+  })() : null
+
+  // A trip is "abandoned" when it's still composing but the overlay has closed
+  // (blur, Run, click-away) without being committed as a chip. That's the point
+  // we flip the composing chip from in-progress blue to error red and explain
+  // what's missing. While the overlay is open we treat it as in-progress and
+  // stay quiet — no nagging mid-build.
+  const composingAbandoned = !!composing && !open
+  const incompleteMessage = !composingAbandoned
+    ? null
+    : composing.op == null
+      ? `Unfinished filter — choose an operator for “${composing.field}”, or remove it.`
+      : isMulti
+        ? `Unfinished filter — pick at least one value for “${composing.field}”, or remove it.`
+        : `Unfinished filter — add a value for “${composing.field}”, or remove it.`
+
+  // The in-progress chip. Renders at the end of the row for a new filter, or in
+  // the edited chip's own slot so the query keeps its reading order while editing.
+  const composingChip = composing ? (
+    <span className={`qb-composing${composingAbandoned ? ' is-error' : ''}${isEditing ? ' is-editing' : ''}`} aria-live="polite">
+      <span className="qb-composing-field">{composing.field}</span>
+      {composing.op != null && <span className="qb-composing-op">{opStartText(composing.op)}</span>}
+      {isMulti && pendingValues.length > 0 && (
+        <span className="qb-composing-op">{pendingValues.map(v => `"${v}"`).join(', ')})</span>
+      )}
+      <button
+        type="button"
+        className="qb-composing-x"
+        onClick={(e) => { e.stopPropagation(); cancelComposing() }}
+        onMouseDown={(e) => e.preventDefault()}
+        aria-label={isEditing ? `Cancel editing ${composing.field}` : `Remove unfinished filter ${composing.field}`}
+        title={isEditing ? 'Cancel edit' : 'Remove unfinished filter'}
+      >×</button>
+    </span>
+  ) : null
 
   return (
     <div className="qb-wrap" ref={wrapRef}>
@@ -536,29 +713,72 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                 {c.connector === 'OR' ? 'OR' : 'AND'}
               </button>
             )}
-            <span className="qb-chip">
-              <span className="qb-chip-field">{c.field}</span>
-              <span className="qb-chip-opval">{opValueText(c.op, c.value)}</span>
-              <button
-                type="button"
-                className="qb-chip-x"
-                onClick={(e) => removeChip(i, e)}
-                aria-label={`Remove filter ${c.field}${opValueText(c.op, c.value)}`}
-                title="Remove filter"
-              >×</button>
-            </span>
+            {editingIndex === i ? (composingChip ?? (
+              // Field phase of an edit: no composing chip exists yet, so show the
+              // original in the editing style — the slot keeps its place and the
+              // × still cancels back to it.
+              <span className="qb-chip is-editing">
+                <span className="qb-chip-field">{c.field}</span>
+                <span className="qb-chip-opval">{opValueText(c.op, c.value)}</span>
+                <button
+                  type="button"
+                  className="qb-chip-x"
+                  onClick={(e) => { e.stopPropagation(); cancelComposing() }}
+                  onMouseDown={(e) => e.preventDefault()}
+                  title="Cancel edit"
+                  aria-label={`Cancel editing ${c.field}`}
+                >×</button>
+              </span>
+            )) : (() => {
+              const seg = chipSegments(c.op, c.value)
+              const full = `${c.field}${opValueText(c.op, c.value)}`
+              const opBtn = (key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className="qb-chip-seg qb-chip-op"
+                  onClick={(e) => beginEdit(i, 'operator', e)}
+                  onMouseDown={(e) => e.preventDefault()}
+                  title="Click to change the operator"
+                  aria-label={`Change operator for ${full}`}
+                >{key === 'pre' ? seg.prefix : seg.suffix}</button>
+              )
+              return (
+                <span className="qb-chip">
+                  <button
+                    type="button"
+                    className="qb-chip-seg qb-chip-field"
+                    onClick={(e) => beginEdit(i, 'field', e)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    title="Click to change the field"
+                    aria-label={`Change field for ${full}`}
+                  >{c.field}</button>
+                  {opBtn('pre')}
+                  {seg.value && (
+                    <button
+                      type="button"
+                      className="qb-chip-seg qb-chip-val"
+                      onClick={(e) => beginEdit(i, 'value', e)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      title="Click to change the value"
+                      aria-label={`Change value for ${full}`}
+                    >{seg.value}</button>
+                  )}
+                  {seg.suffix && opBtn('suf')}
+                  <button
+                    type="button"
+                    className="qb-chip-x"
+                    onClick={(e) => removeChip(i, e)}
+                    aria-label={`Remove filter ${full}`}
+                    title="Remove filter"
+                  >×</button>
+                </span>
+              )
+            })()}
           </Fragment>
         ))}
 
-        {composing && (
-          <span className="qb-composing" aria-live="polite">
-            <span className="qb-composing-field">{composing.field}</span>
-            {composing.op != null && <span className="qb-composing-op">{opStartText(composing.op)}</span>}
-            {isMulti && pendingValues.length > 0 && (
-              <span className="qb-composing-op">{pendingValues.map(v => `"${v}"`).join(', ')})</span>
-            )}
-          </span>
-        )}
+        {!isEditing && composingChip}
 
         <input
           ref={inputRef}
@@ -571,14 +791,40 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
           spellCheck={false}
           autoComplete="off"
         />
+
+        {chips.length > 0 && (
+          <button
+            type="button"
+            className="qb-clear-all"
+            onClick={clearAll}
+            onMouseDown={(e) => e.preventDefault()}
+            title="Clear all filters"
+            aria-label="Clear all filters"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        )}
       </div>
 
+      {incompleteMessage && (
+        <div className="qb-composing-error" role="alert">
+          <AlertCircle size={12} strokeWidth={2} />
+          <span>{incompleteMessage}</span>
+        </div>
+      )}
+
       {open && (
-        <div className="qb-overlay" role="listbox">
+        // stopPropagation here keeps a click on an overlay row from reaching the
+        // document-level outside-click handler. Without it, a row that re-renders
+        // out of existence on click (facet → operators) is seen as a detached
+        // target "outside" the wrap, which wrongly closed the overlay and broke
+        // the field → operator → value flow.
+        <div className="qb-overlay" role="listbox" onMouseDown={(e) => e.stopPropagation()}>
           <div ref={listRef} className="qb-overlay-scroll">
 
             {suggestions.mode === 'fields' && (
               <>
+                {suggestions.freeTextFirst && freeTextSection}
                 <Section label="Top Facets / Keys" meta="Indexed">
                   {suggestions.facets.length === 0 ? (
                     <Empty>No fields match "{text}"</Empty>
@@ -595,6 +841,8 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                     )
                   })}
                 </Section>
+
+                {!suggestions.freeTextFirst && freeTextSection}
 
                 <Section label="Recent Searches" meta={suggestions.recents.length ? `Last ${suggestions.recents.length}` : 'Empty'}>
                   {suggestions.recents.length === 0 ? (

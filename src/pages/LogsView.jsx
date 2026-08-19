@@ -55,17 +55,82 @@ function VolumeTooltip({ active, payload, label }) {
   )
 }
 
-function FacetGroup({ title, options, selected, onToggle }) {
+// Rows visible before the facet list starts scrolling.
+const FACET_VISIBLE_ROWS = 6
+
+// 'chip'  — inline eye toggle riding on the "N selected" count.
+// 'link'  — separate text link on its own line under the meta row.
+function FacetGroup({ title, options, selected, onToggle, toggleVariant = 'chip' }) {
   const [open, setOpen] = useState(true)
   const [q, setQ] = useState('')
-  const filtered = q ? options.filter(o => o.value.toLowerCase().includes(q.toLowerCase())) : options
+  const [onlySelected, setOnlySelected] = useState(false)
+
   const selectedCount = options.filter(o => selected.has(o.value)).length
+
+  // Unchecking the last value while filtered to selections would strand the user
+  // on an empty list, so drop back to showing everything.
+  useEffect(() => {
+    if (onlySelected && selectedCount === 0) setOnlySelected(false)
+  }, [onlySelected, selectedCount])
+
+  const searched = q ? options.filter(o => o.value.toLowerCase().includes(q.toLowerCase())) : options
+  const shown = onlySelected ? searched.filter(o => selected.has(o.value)) : searched
+  const scrollable = shown.length > FACET_VISIBLE_ROWS
+
   return (
     <div className="facet-group">
       <div className="facet-head" onClick={() => setOpen(o => !o)}>
         <div>
           <div className="facet-title">{title}</div>
-          <div className="facet-meta">{options.length} total · <span className={selectedCount ? 'facet-meta-hi' : ''}>{selectedCount} selected</span></div>
+          <div className="facet-meta">
+            <div className="facet-meta-left">
+              <span>{options.length} total ·</span>
+              {toggleVariant === 'link' || selectedCount === 0 ? (
+                // In the 'link' variant this count is just a label — the separate
+                // "Show selected only" link carries the action — so keep it black
+                // rather than brand-blue, which would imply it's clickable.
+                <span className={selectedCount ? (toggleVariant === 'link' ? 'facet-meta-count' : 'facet-meta-hi') : undefined}>{selectedCount} selected</span>
+              ) : (
+                <button
+                  type="button"
+                  className={`facet-sel-toggle${onlySelected ? ' on' : ''}`}
+                  aria-pressed={onlySelected}
+                  title={onlySelected
+                    ? `Showing only selected — click to show all ${options.length} values`
+                    : `Show only the ${selectedCount} selected value${selectedCount === 1 ? '' : 's'}`}
+                  onClick={(e) => { e.stopPropagation(); setOpen(true); setOnlySelected(v => !v) }}
+                >
+                  {selectedCount} selected
+                  {onlySelected ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  )}
+                </button>
+              )}
+            </div>
+            {selectedCount > 0 && (
+              <button
+                type="button"
+                className="facet-clear-btn-meta"
+                title="Clear selected"
+                onClick={(e) => { e.stopPropagation(); [...selected].forEach(v => onToggle(title, v)) }}
+              >
+                <span>Clear</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            )}
+          </div>
+          {toggleVariant === 'link' && selectedCount > 0 && open && (
+            <button
+              type="button"
+              className="facet-sel-link"
+              aria-pressed={onlySelected}
+              onClick={(e) => { e.stopPropagation(); setOpen(true); setOnlySelected(v => !v) }}
+            >
+              {onlySelected ? 'Show all' : 'Show selected only'}
+            </button>
+          )}
         </div>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={`facet-chev${open ? ' open' : ''}`}><path d="M6 9l6 6 6-6"/></svg>
       </div>
@@ -74,8 +139,9 @@ function FacetGroup({ title, options, selected, onToggle }) {
           <div className="facet-search">
             <input placeholder="search…" value={q} onChange={e => setQ(e.target.value)} />
           </div>
-          <div className="facet-list">
-            {filtered.map(o => (
+          <div className={`facet-list${scrollable ? ' scrollable' : ''}`}>
+            {shown.length === 0 && <div className="facet-none">No values match</div>}
+            {shown.map(o => (
               <label key={o.value} className="facet-opt">
                 <input type="checkbox" checked={selected.has(o.value)} onChange={() => onToggle(title, o.value)} />
                 <span className="facet-opt-label" title={o.value}>{o.value}</span>
@@ -481,6 +547,10 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   // raw text rather than feeding a separate preview.
   const [queryMode, setQueryMode] = useState('builder')
   const [rawText, setRawText] = useState('')
+  // True while the builder has an uncommitted, half-built filter chip. Drives the
+  // Run button into a disabled (toned-down) state — you can't run a query that
+  // still has an unfinished filter in it.
+  const [builderComposing, setBuilderComposing] = useState(false)
 
   // In raw mode the text is the source of truth for filtering, so parse its
   // conditions head back into chips and surface any failure under the input.
@@ -996,7 +1066,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             <button className="logs-filters-clear" onClick={() => setFilters({})}>Clear all</button>
           )}
         </div>
-        <FacetGroup title="log.level" options={logFacets['log.level']} selected={getSet('log.level')} onToggle={toggleFilter} />
+        <FacetGroup title="log.level" options={logFacets['log.level']} selected={getSet('log.level')} onToggle={toggleFilter} toggleVariant="link" />
         <FacetGroup title="service" options={logFacets['service']} selected={getSet('service')} onToggle={toggleFilter} />
         <div
           className="logs-filters-resize"
@@ -1010,30 +1080,15 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       <div className="logs-main">
       <div className="logs-main-body">
         <div className="logs-query-bar">
-          {queryMode === 'raw' ? (
-            <RawQueryInput
-              value={rawText}
-              onChange={setRawText}
-              error={rawParse.error}
-              onSubmit={() => addRecent(rawParse.chips)}
-              leading={modeToggle}
-            />
-          ) : (
-            <QueryBuilder
-              chips={chips}
-              setChips={setChips}
-              recents={recents}
-              addRecent={addRecent}
-              savedQueries={userSavedQueries}
-              onRun={() => { /* results already reactive; kept as an explicit signal */ }}
-              leading={modeToggle}
-            />
-          )}
-          {queryMode === 'raw' && (
-            <a className="hbtn small icon-only" title="See documentation for Querying" aria-label="See documentation for Querying" href="https://docs.cubeapm.com/logs/querying" target="_blank" rel="noopener noreferrer">
-              <FileText size={16} strokeWidth={2} />
-            </a>
-          )}
+          <QueryBuilder
+            chips={chips}
+            setChips={setChips}
+            recents={recents}
+            addRecent={addRecent}
+            savedQueries={userSavedQueries}
+            onRun={() => { /* results already reactive; kept as an explicit signal */ }}
+            onComposingChange={setBuilderComposing}
+          />
           <button className="hbtn small icon-only" title="Query history" aria-label="Query history" onClick={() => setHistoryOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
           </button>
@@ -1136,8 +1191,9 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           </PipePill>
           <button
             className="hbtn primary run-btn"
-            title="Run query"
+            title={queryMode === 'builder' && builderComposing ? 'Finish or remove the unfinished filter to run' : 'Run query'}
             aria-label="Run query"
+            disabled={queryMode === 'builder' && builderComposing}
             onClick={() => addRecent(chips)}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>

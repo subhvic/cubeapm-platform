@@ -7,7 +7,11 @@ const seededRnd = seed => {
 
 /* ============ LOGS ============ */
 
-const LOG_SERVICES = ['order', 'payment', 'shipment', 'search']
+const LOG_SERVICES = [
+  'order', 'payment', 'shipment', 'search', 'auth', 'cart', 'catalog', 'checkout',
+  'inventory', 'notification', 'pricing', 'recommendation', 'reviews', 'session',
+  'user-profile', 'warehouse',
+]
 
 const SVC_ENDPOINT = { order: '/v1/order', payment: '/v1/payment', shipment: '/v1/shipment', search: '/v1/search' }
 
