@@ -367,6 +367,13 @@ a { color: inherit; }
 .hbtn.icon { padding: 8px; color: var(--text-primary); }
 .hbtn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
 .hbtn.primary:hover { background: var(--brand-active, #2563EB); border-color: var(--brand-active, #2563EB); color: #fff; }
+/* Disabled primary — a toned-down blue from the muted-brand pairing, so it still
+   reads as the Run action but clearly not clickable (e.g. an unfinished filter). */
+.hbtn.primary:disabled,
+.hbtn.primary:disabled:hover {
+  background: var(--brand-muted); border-color: var(--brand-muted);
+  color: var(--brand-on-muted); cursor: not-allowed;
+}
 .hbtn.brand-lit { background: transparent; border-color: var(--brand); color: var(--brand); }
 .hbtn.brand-lit:hover { background: var(--brand-muted); border-color: var(--brand); color: var(--brand); }
 .hbtn svg { width: 15px; height: 15px; }
@@ -984,17 +991,59 @@ tbody tr:hover { background: var(--panel-2); }
 .logs-filters-clear:hover { color: var(--brand-active); }
 .facet-group { border-bottom: 1px solid var(--border-subtle); }
 .facet-group:last-child { border-bottom: none; }
-.facet-head { padding: 10px 14px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+.facet-head { padding: 10px 14px; cursor: pointer; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .facet-head:hover { background: var(--panel-2); }
+/* Let the title/meta column take the full width so the meta row's right edge
+   reaches the chevron — needed for the clear button's margin-left:auto. */
+.facet-head > div { flex: 1; min-width: 0; }
 .facet-title { font-size: 11.5px; font-weight: 600; color: var(--text-primary); font-family: 'JetBrains Mono', monospace; }
-.facet-meta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.facet-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.facet-meta-left { display: flex; align-items: center; gap: 4px; }
 .facet-meta-hi { color: var(--brand); font-weight: 600; }
+/* 'link' variant: the count is a static label, not a control, so it reads in
+   primary text rather than the brand-blue that would suggest it's clickable. */
+.facet-meta-count { color: var(--text-primary); font-weight: 600; }
 .facet-chev { width: 12px; height: 12px; color: var(--text-muted); transition: transform .12s; }
 .facet-chev.open { transform: rotate(180deg); }
 .facet-search { padding: 4px 12px 6px; }
 .facet-search input { width: 100%; background: var(--panel); border: 1px solid var(--border-subtle); color: var(--text-primary); font-family: inherit; font-size: 10.5px; border-radius: var(--radius-sm); padding: 4px 8px; outline: none; }
 .facet-search input:focus { border-color: var(--brand); }
-.facet-list { padding: 2px 0 8px; max-height: 220px; overflow-y: auto; }
+/* Caps the list at FACET_VISIBLE_ROWS (6) rows; shorter lists are unaffected. */
+.facet-list { --facet-row-h: 23.25px; padding: 2px 0 8px; max-height: calc(var(--facet-row-h) * 6 + 2px); overflow-y: auto; }
+/* Fade the bottom edge so a full 6th row still reads as "there is more below". */
+.facet-list.scrollable {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+}
+.facet-none { padding: 6px 12px; font-size: 10.5px; color: var(--text-muted); font-style: italic; }
+/* "N selected" doubles as the show-only-selected toggle — interactive only when N > 0. */
+.facet-sel-toggle {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: none; padding: 0;
+  color: var(--brand); font-family: inherit; font-size: 10px; font-weight: 600; line-height: 1;
+  cursor: pointer; transition: filter .12s;
+}
+.facet-sel-toggle svg { width: 10px; height: 10px; flex-shrink: 0; }
+/* No box left to signal pressability — the underline carries it. */
+.facet-sel-toggle:hover { filter: brightness(1.2); text-decoration: underline; }
+/* Clear button inline with "N selected" in the meta row, pushed to the far right. */
+.facet-clear-btn-meta {
+  display: inline-flex; align-items: center; gap: 3px;
+  margin-left: auto; margin-right: -14px; flex-shrink: 0;
+  background: none; border: none; padding: 0; padding-left: 4px; line-height: 1;
+  color: var(--text-muted); font-size: 10px; font-weight: 600; cursor: pointer;
+  transition: color .12s;
+}
+.facet-clear-btn-meta:hover { color: var(--text-primary); }
+.facet-clear-btn-meta svg { width: 10px; height: 10px; flex-shrink: 0; }
+/* 'link' variant — own line beneath the meta row, appears only once something is selected. */
+.facet-sel-link {
+  display: inline-block; margin-top: 4px; padding: 0;
+  background: none; border: none; line-height: 1;
+  color: var(--brand); font-family: inherit; font-size: 10px; font-weight: 600;
+  cursor: pointer; transition: filter .12s;
+}
+.facet-sel-link:hover { filter: brightness(1.2); text-decoration: underline; }
 .facet-opt { display: flex; align-items: center; gap: 8px; padding: 4px 12px; cursor: pointer; font-size: 11px; }
 .facet-opt:hover { background: var(--panel-2); }
 .facet-opt input { accent-color: var(--brand); flex-shrink: 0; }
@@ -1120,11 +1169,11 @@ tbody tr:hover { background: var(--panel-2); }
 .qb-input-row {
   display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
   background: transparent; border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm); padding: 3px 10px 3px 4px; min-height: 32px;
+  border-radius: var(--radius-sm); padding: 3px 10px 3px 8px; min-height: 32px;
   cursor: text; transition: border-color .12s;
 }
 .qb-input-row:focus-within { border-color: var(--brand); }
-.qb-input-row > svg { width: 13px; height: 13px; color: var(--text-muted); flex-shrink: 0; }
+.qb-input-row > svg { width: 16px; height: 16px; color: var(--text-muted); flex-shrink: 0; margin-right: 4px; }
 
 .qb-chip {
   display: inline-flex; align-items: center;
@@ -1232,9 +1281,44 @@ tbody tr:hover { background: var(--panel-2); }
 }
 .qb-chip-x:hover { opacity: 1; background: rgba(59,130,246,.16); }
 
+/* Each part of a chip — field, operator, value — is its own button, so clicking
+   a part re-opens the builder at exactly that step. They're styled to disappear
+   into the chip: the affordance is the cursor plus a hover tint on the one part
+   under the pointer, not three visible boxes inside one chip. */
+.qb-chip-seg {
+  display: inline-flex; align-items: center;
+  background: none; border: none; padding: 0 1px; margin: 0;
+  font: inherit; color: inherit; cursor: pointer;
+  border-radius: 3px; transition: background-color .12s;
+}
+.qb-chip-seg:hover { background: rgba(59,130,246,.22); }
+.qb-chip-val { color: var(--brand-on-muted); }
+
+/* Editing reuses the composing chip, but solid rather than dashed: a dashed
+   outline reads as "not finished yet", while this filter already exists. */
+.qb-composing.is-editing,
+.qb-chip.is-editing {
+  border-style: solid;
+  box-shadow: 0 0 0 2px rgba(59,130,246,.18);
+}
+
+/* Clear-everything control, pinned to the right edge of the bar. Deliberately
+   quiet at rest so it never competes with the chips, and only firms up on hover
+   — it wipes the whole query, so it shouldn't invite an idle click. */
+.qb-clear-all {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: auto; flex-shrink: 0;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); opacity: .65;
+  padding: 3px; border-radius: 3px;
+  transition: color .12s, opacity .12s, background-color .12s;
+}
+.qb-clear-all:hover { color: var(--text-primary); opacity: 1; background: var(--panel-2); }
+.qb-clear-all svg { width: 13px; height: 13px; }
+
 .qb-composing {
   display: inline-flex; align-items: center;
-  padding: 2px 7px; border-radius: 4px;
+  padding: 2px 2px 2px 7px; border-radius: 4px;
   background: var(--brand-muted);
   border: 1px dashed rgba(59,130,246,0.55);
   font-family: 'JetBrains Mono', monospace; font-size: 10.5px; line-height: 1.4;
@@ -1242,11 +1326,38 @@ tbody tr:hover { background: var(--panel-2); }
 .qb-composing-field { color: var(--brand-on-muted); font-weight: 600; }
 .qb-composing-op { color: var(--brand-on-muted); opacity: .7; }
 
+/* Abandoned mid-build trip: field (+ operator) with no committed value once the
+   overlay closes. Flip to the critical palette so it reads as "unfinished". */
+.qb-composing.is-error {
+  background: var(--critical-tint);
+  border-color: var(--critical);
+}
+.qb-composing.is-error .qb-composing-field,
+.qb-composing.is-error .qb-composing-op { color: var(--critical-fg); }
+
+.qb-composing-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer;
+  color: var(--brand-on-muted); opacity: .6;
+  font-size: 13px; line-height: 1; font-family: inherit;
+  padding: 0 3px; margin-left: 3px; border-radius: 3px;
+}
+.qb-composing-x:hover { opacity: 1; background: rgba(59,130,246,.16); }
+.qb-composing.is-error .qb-composing-x { color: var(--critical-fg); }
+.qb-composing.is-error .qb-composing-x:hover { background: var(--critical-tint); }
+
+.qb-composing-error {
+  display: flex; align-items: center; gap: 5px;
+  margin-top: 6px; padding: 0 2px;
+  font-size: 10.5px; color: var(--critical-fg);
+}
+.qb-composing-error svg { flex-shrink: 0; }
+
 .qb-input {
   flex: 1; min-width: 120px; background: none; border: none; outline: none;
   color: var(--text-primary);
   font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
-  padding: 2px 0;
+  padding: 2px 0 2px 4px;
 }
 .qb-input::placeholder { color: var(--text-muted); font-family: 'Rubik', sans-serif; }
 
