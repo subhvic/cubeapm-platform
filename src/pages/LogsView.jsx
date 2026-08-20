@@ -6,7 +6,7 @@ import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldVa
 import { flattenLeaves } from '@/utils/queryTree'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
-import { composeQuery, serializePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
+import { serializePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
 import { tryParseConditions, splitQuery, replacePipeSection, validatePipeText } from '@/utils/rawQuery'
 import PipePill, { PipePillChip } from '@/components/PipePill'
 import AggregationPopover from '@/components/AggregationPopover'
@@ -741,21 +741,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const toggleHistorySave = useCallback((id, name) => {
     setHistorySaved(prev => ({ ...prev, [id]: name }))
   }, [])
-  const [userSavedQueries, setUserSavedQueries] = useState([])
-  const [savingName, setSavingName] = useState(null) // null = idle | string = editing name
-  const [justSaved, setJustSaved] = useState(false)
-  // Saves whichever chip set is currently driving results, so this stays
-  // correct if the save affordance is ever surfaced in raw mode too.
-  const saveCurrentQuery = useCallback((name) => {
-    if (!name.trim() || effectiveChips.length === 0) return
-    setUserSavedQueries(prev => [
-      { name: name.trim(), chips: [...effectiveChips] },
-      ...prev.filter(s => s.name !== name.trim()),
-    ])
-    setJustSaved(true)
-    const timer = setTimeout(() => setJustSaved(false), 2000)
-    return () => clearTimeout(timer)
-  }, [effectiveChips])
   const [zoom, setZoom] = useState(null)
   const [dragBrush, setDragBrush] = useState(null)
   // Text-selection context menu: { x, y, text, field, value } | null
@@ -946,15 +931,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     return [...new Set(terms)].sort((a, b) => b.length - a.length)
   }, [effectiveChips, query])
 
-  // The composed query string — chips + serialized pipes. Kept as one memo
-  // so the preview visibility check and the copy-to-clipboard action stay
-  // in sync (both hide when the query is effectively empty). In raw mode the
-  // user's own text is already the query, so there's nothing to compose.
-  const composedQuery = useMemo(
-    () => (queryMode === 'raw' ? rawText.trim() : composeQuery(chipsToString(chips), pipes)),
-    [queryMode, rawText, chips, pipes]
-  )
-
   // Pill edits in raw mode rewrite only the pipe section, leaving the
   // hand-written conditions head untouched. Writing the same string back is a
   // no-op for React, so this can't feed back into itself.
@@ -1088,7 +1064,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             setChips={setChips}
             recents={recents}
             addRecent={addRecent}
-            savedQueries={userSavedQueries}
             onRun={() => { /* results already reactive; kept as an explicit signal */ }}
             onComposingChange={setBuilderComposing}
           />
@@ -1257,52 +1232,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           initial={editingMath}
           availableNames={mathAvailableNames}
         />
-
-        {/* Raw mode has no generated-query strip: the input itself already
-            shows the exact query, so a read-only echo of it is pure noise. */}
-        {queryMode === 'builder' && composedQuery.length > 0 && (
-          <div className="logs-query-preview">
-            <span className="qb-preview-label">Generated Query</span>
-            <code className="qb-preview-code">{composedQuery}</code>
-            <button
-              type="button"
-              className="qb-preview-copy"
-              onClick={() => { try { navigator.clipboard.writeText(composedQuery) } catch (_) {} }}
-              title="Copy query to clipboard"
-              aria-label="Copy query"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            </button>
-            {savingName === null ? (
-              <button
-                type="button"
-                className={`qb-preview-save${justSaved ? ' saved' : ''}`}
-                onClick={() => !justSaved && setSavingName('')}
-                disabled={justSaved}
-                title={justSaved ? 'Query saved!' : "Save this query for later — appears in the Saved Queries section of the search overlay"}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                {justSaved ? 'Saved' : 'Save query'}
-              </button>
-            ) : (
-              <form
-                className="qb-preview-save-form"
-                onSubmit={(e) => { e.preventDefault(); if (savingName.trim()) { saveCurrentQuery(savingName); setSavingName(null) } }}
-              >
-                <input
-                  autoFocus
-                  className="qb-preview-save-input"
-                  placeholder="Query name…"
-                  value={savingName}
-                  onChange={(e) => setSavingName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Escape') setSavingName(null) }}
-                />
-                <button type="submit" className="qb-preview-save-confirm" disabled={!savingName.trim()}>Save</button>
-                <button type="button" className="qb-preview-save-cancel" onClick={() => setSavingName(null)} aria-label="Cancel">×</button>
-              </form>
-            )}
-          </div>
-        )}
 
         <div className="logs-controls">
           <div className="logs-controls-left">

@@ -19,7 +19,9 @@ export function isGroup(n) {
 // behind — the round-trip tests compare nodes with deepEqual, which counts
 // an explicitly-undefined key as a difference.
 function setConn(node, conn) {
-  const { connector, ...rest } = node
+  // The discarded binding is the point: destructuring is how the key gets
+  // dropped entirely rather than left set to undefined.
+  const { connector: _dropped, ...rest } = node
   return conn == null ? rest : { ...rest, connector: conn }
 }
 
