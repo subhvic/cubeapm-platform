@@ -146,6 +146,12 @@ const ROUND_TRIP = [
   '{service in ("order", "payment")} log.level:=error',
   'log.level:=error OR log.level:=warn',
   'log.level:=error AND log.level:=warn',
+  // Groups. `log.level`, `path` and `http.status` are not stream-eligible, so
+  // nothing gets promoted into a leading {} block and the string is exact.
+  '(log.level:=error OR log.level:=warn) AND path:*pay*',
+  '(log.level:=error AND path:*pay*) OR (log.level:=warn AND path:*ord*)',
+  '((log.level:=error OR log.level:=warn) AND path:*pay*) OR http.status:5*',
+  'path:*pay* AND (log.level:=error OR log.level:=warn)',
 ]
 
 for (const q of ROUND_TRIP) {
@@ -210,10 +216,50 @@ test('error: NOT is rejected with a pointer to the supported form', () => {
   assert.match(r.error, /not_in/i)
 })
 
-test('error: parenthesised groups rejected', () => {
-  const r = tryParseConditions('(service:=a OR service:=b)')
+test('parse: a group becomes a group node', () => {
+  const chips = parseConditions('(log.level:=error OR log.level:=warn) AND path:*pay*')
+  assert.equal(chips.length, 2)
+  assert.equal(chips[0].kind, 'group')
+  assert.equal(chips[0].children.length, 2)
+  assert.equal(chips[0].children[1].connector, 'OR')
+  assert.equal(chips[1].connector, 'AND')
+})
+
+test('parse: a single-child group unwraps to a bare chip', () => {
+  assert.deepEqual(parseConditions('(log.level:=error)'), [
+    { field: 'log.level', op: 'eq', value: 'error' },
+  ])
+})
+
+test('parse: groups nest', () => {
+  const chips = parseConditions('((log.level:=error OR log.level:=warn) AND path:*pay*) OR http.status:5*')
+  assert.equal(chips[0].kind, 'group')
+  assert.equal(chips[0].children[0].kind, 'group')
+  assert.equal(chips[0].children[0].children.length, 2)
+  assert.equal(chips[1].connector, 'OR')
+})
+
+test('parse: in() parens are values, not groups', () => {
+  const chips = parseConditions('log.level in ("error", "warn")')
+  assert.deepEqual(chips, [{ field: 'log.level', op: 'in', value: ['error', 'warn'] }])
+})
+
+test('error: unclosed paren', () => {
+  const r = tryParseConditions('(log.level:=error OR log.level:=warn')
   assert.equal(r.ok, false)
-  assert.match(r.error, /Parenthesised/i)
+  assert.match(r.error, /Unclosed/i)
+})
+
+test('error: unmatched closing paren', () => {
+  const r = tryParseConditions('log.level:=error)')
+  assert.equal(r.ok, false)
+  assert.match(r.error, /Unmatched/i)
+})
+
+test('error: empty group', () => {
+  const r = tryParseConditions('() AND log.level:=error')
+  assert.equal(r.ok, false)
+  assert.match(r.error, /Empty group/i)
 })
 
 test('error: bad stream operator', () => {
