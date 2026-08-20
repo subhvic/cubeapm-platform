@@ -137,6 +137,32 @@ export function deriveOp(op, value) {
   return { op, value: v }
 }
 
+// Free text carries its own syntax too: `"a b"` is a phrase, `pay*` a prefix,
+// `*pay*` a substring. Without this the quotes and stars are taken as literal
+// characters to search for, so `"text"` would generate `_msg:""text""`.
+//
+// `explicit` says the user wrote the decoration themselves, which is the signal
+// to lead the suggestion list with that reading rather than guessing.
+export function deriveFreeText(typed) {
+  const t = (typed ?? '').trim()
+  const wrapped = (open, close, minLen) =>
+    t.length >= minLen && t.startsWith(open) && t.endsWith(close)
+
+  if (wrapped('"', '"', 2)) {
+    const v = t.slice(1, -1)
+    if (v) return { op: 'phrase', value: v, explicit: true }
+  }
+  if (wrapped('*', '*', 3)) {
+    const v = t.slice(1, -1)
+    if (v) return { op: 'contains', value: v, explicit: true }
+  }
+  if (t.length >= 2 && t.endsWith('*')) {
+    const v = t.slice(0, -1)
+    if (v && !v.endsWith('*')) return { op: 'prefix', value: v, explicit: true }
+  }
+  return { op: null, value: t, explicit: false }
+}
+
 // Splits `"a", "b"` into ['a','b'] for in()/not_in().
 export function parseListValue(inner) {
   const out = []

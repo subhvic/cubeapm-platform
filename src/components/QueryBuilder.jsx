@@ -7,7 +7,7 @@ import {
 } from '@/utils/queryTree'
 import {
   splitField, resolveOperator, buildChip, isCommittable, interpret, isKnownField,
-  matchConnector,
+  matchConnector, CONNECTORS, deriveFreeText,
 } from '@/utils/typedQuery'
 
 // ---------- Field catalog ----------
@@ -143,20 +143,39 @@ function opStartText(op) {
 // The free-text readings offered for whatever the user typed. Mirrors the Text
 // operator set the field path exposes, so "search the message" gets the same
 // substring / prefix / exact-phrase choice a field filter would.
+// Ordered narrowest reading first: the exact phrase, then that run of
+// characters at the start of the message, then anywhere in it. The first row is
+// also the Enter default, so the tightest match is what you get for free.
 const FREE_TEXT_OPS = [
-  { op: 'contains', label: 'containing' },
-  { op: 'prefix',   label: 'starting with' },
-  { op: 'phrase',   label: 'matching the exact phrase' },
+  { op: 'phrase',   label: 'matching the exact phrase' },  // "text"
+  { op: 'prefix',   label: 'starting with' },              // text*
+  { op: 'contains', label: 'containing' },                 // *text*
 ]
 
 // Builds the free-text rows for a typed string. Multi-word input gets one extra
 // option that splits on whitespace into a chip per word (AND-ed), which reads as
 // "all of these words appear" rather than "this exact run of characters appears".
 function buildFreeTextOptions(typed) {
-  const words = typed.split(/\s+/).filter(Boolean)
-  const opts = FREE_TEXT_OPS.map(o => ({ ...o, value: typed, kind: 'single' }))
+  // Quotes and stars the user typed are syntax, so they are stripped off the
+  // value and used to pick which reading leads — otherwise `"text"` would search
+  // for a string that literally includes the quote characters.
+  const { op: writtenOp, value, explicit } = deriveFreeText(typed)
+  const words = value.split(/\s+/).filter(Boolean)
+  const opts = FREE_TEXT_OPS.map(o => ({ ...o, value, kind: 'single' }))
+
+  if (explicit) {
+    // They already said which one they want; the others stay available below.
+    return [
+      ...opts.filter(o => o.op === writtenOp),
+      ...opts.filter(o => o.op !== writtenOp),
+    ]
+  }
   if (words.length > 1) {
-    opts.push({ op: 'contains', label: 'containing all of', value: typed, words, kind: 'split' })
+    // Several words are far more often "find these words" than "find this exact
+    // run of characters", so the split reading leads once there is a space.
+    // Quoting is exactly how someone says they did NOT mean separate words,
+    // which is why this only applies when nothing was written explicitly.
+    opts.unshift({ op: 'contains', label: 'containing all of', value, words, kind: 'split' })
   }
   return opts
 }
@@ -443,22 +462,37 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     // default; otherwise they sit behind the field matches as a deliberate choice.
     const typed = text.trim()
     const freeText = typed ? buildFreeTextOptions(typed) : []
+    // AND/OR are offered once there is something for them to join to. Matching
+    // is case-insensitive so `an` still surfaces the row, but only an exact
+    // uppercase AND/OR ranks it first — otherwise Enter on a lowercase "and"
+    // would commit a connector when the user meant to search for the word.
+    const canConnect = chips.length > 0 || !!insertionPath
+    const conns = canConnect
+      ? CONNECTORS.filter(c => !typed || c.startsWith(typed.toUpperCase()))
+      : []
+
     // The group row is an action, not a match — it only makes sense on an empty
     // input, where the user isn't already narrowing towards a field.
     return {
       mode: 'fields', recents: rec, saved: sav, facets: fac, freeText,
       freeTextFirst: fac.length === 0, canGroup: !typed,
+      connectors: conns, connectorsFirst: CONNECTORS.includes(typed),
     }
-  }, [text, phase, composing, needsTypedValue, recents, savedQueries])
+  }, [text, phase, composing, needsTypedValue, recents, savedQueries, chips.length, insertionPath])
 
   const flatItems = useMemo(() => {
     if (suggestions.mode === 'fields') {
       // Mirrors the section order rendered below — keyboard index must track it.
       const ft = suggestions.freeText.map((o, i) => ({ kind: 'freetext', payload: o, key: `ft${i}` }))
       const fac = suggestions.facets.map((f, i) => ({ kind: 'facet', payload: f, key: `f${i}` }))
+      const conn = suggestions.connectors.map((c, i) => ({ kind: 'connector', payload: c, key: `c${i}` }))
       return [
+        // An exact AND/OR leads, so Enter and Tab take the connector rather than
+        // a free-text search for the word itself.
+        ...(suggestions.connectorsFirst ? conn : []),
         ...(suggestions.freeTextFirst ? ft : fac),
         ...(suggestions.freeTextFirst ? fac : ft),
+        ...(suggestions.connectorsFirst ? [] : conn),
         // Sits behind the field matches so it never steals the Enter target.
         ...(suggestions.canGroup ? [{ kind: 'group', payload: null, key: 'grp' }] : []),
         ...suggestions.recents.map((r, i) => ({ kind: 'recent', payload: r, key: `r${i}` })),
@@ -587,6 +621,13 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   const commitItem = (item) => {
     if (!item) return
     if (item.kind === 'group') { startGroup(); return }
+    if (item.kind === 'connector') {
+      setPendingConnector(item.payload)
+      setText('')
+      setHighlight(0)
+      inputRef.current?.focus()
+      return
+    }
     // Free text commits straight to a chip — no operator/value phases, since the
     // field (_msg) and the operator are both carried by the chosen row. The split
     // variant lands several chips at once, one per word.
@@ -650,6 +691,9 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
 
   const stepBack = () => {
     if (!composing) {
+      // A pending connector is the most recent thing added, so it goes first —
+      // otherwise backspace would reach past it and delete the chip before it.
+      if (pendingConnector) { setPendingConnector(null); return }
       const last = lastLeafPath(chips)
       if (last) setChips(removeAt(chips, last, insertionPath))
       return
@@ -897,6 +941,14 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     setChips(toggleConnectorAt(chips, path))
   }
 
+  // The pending connector isn't on a chip yet, so it flips its own state rather
+  // than going through the tree — but it has to behave identically to a
+  // committed one, which is click-to-toggle.
+  const togglePendingConnector = () => {
+    setPendingConnector(c => (c === 'OR' ? 'AND' : 'OR'))
+    inputRef.current?.focus()
+  }
+
   const groupWith = (path, dir) => {
     setChips(wrapWithNeighbour(chips, path, dir))
     setInsertionPath(null)
@@ -992,6 +1044,27 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     </Section>
   ) : null
 
+  const connectorSection = suggestions.mode === 'fields' && suggestions.connectors?.length ? (
+    <Section label="Connector" meta="Joins to the previous filter">
+      {suggestions.connectors.map((c, i) => {
+        const idx = flatItems.findIndex(x => x.key === `c${i}`)
+        return (
+          <Row key={`c${i}`} icon={c === 'OR' ? '∨' : '∧'} active={idx === highlight}
+            onHover={() => setHighlight(idx)} onPick={() => commitItem(flatItems[idx])}
+            label={<>
+              <span className="qb-ov-name">{c}</span>
+              <span className="qb-ov-meta">
+                {c === 'OR'
+                  ? 'Match either this filter or the one before it'
+                  : 'Match this filter as well as the one before it'}
+              </span>
+            </>}
+            meta={<span className="qb-ov-preview mono">… {c} …</span>} />
+        )
+      })}
+    </Section>
+  ) : null
+
   // A trip is "abandoned" when it's still composing but the overlay has closed
   // (blur, Run, click-away) without being committed as a chip. That's the point
   // we flip the composing chip from in-progress blue to error red and explain
@@ -1009,10 +1082,14 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   // Shows a typed `AND`/`OR` in the slot it will occupy, so the connector is
   // visible before the chip it belongs to exists.
   const connectorGhost = pendingConnector ? (
-    <span
+    <button
+      type="button"
       className={`qb-connector is-ghost${pendingConnector === 'OR' ? ' or' : ''}`}
-      aria-label={`Pending connector ${pendingConnector}`}
-    >{pendingConnector}</span>
+      onClick={(e) => { e.stopPropagation(); togglePendingConnector() }}
+      onMouseDown={(e) => e.preventDefault()}
+      title={`Boolean connector — click to toggle (currently ${pendingConnector}). Backspace removes it.`}
+      aria-label={`Toggle pending connector — currently ${pendingConnector}`}
+    >{pendingConnector}</button>
   ) : null
 
   // The in-progress chip. Renders at the end of the row for a new filter, or in
@@ -1060,7 +1137,6 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     )
     return (
       <span className={`qb-chip${isFreeText ? ' is-freetext' : ''}`}>
-        {isFreeText && <span className="qb-chip-ft" aria-hidden>⌕</span>}
         {!isFreeText && (
           <button
             type="button"
@@ -1290,6 +1366,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
 
             {suggestions.mode === 'fields' && (
               <>
+                {suggestions.connectorsFirst && connectorSection}
                 {suggestions.freeTextFirst && freeTextSection}
                 <Section label="Top Facets / Keys" meta="Indexed">
                   {suggestions.facets.length === 0 ? (
@@ -1309,6 +1386,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                 </Section>
 
                 {!suggestions.freeTextFirst && freeTextSection}
+                {!suggestions.connectorsFirst && connectorSection}
                 {suggestions.canGroup && (() => {
                   const idx = flatItems.findIndex(x => x.key === 'grp')
                   return (

@@ -1208,76 +1208,6 @@ tbody tr:hover { background: var(--panel-2); }
 }
 .qb-connector.or:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
 
-/* Canonical CubeAPM query preview — full-width row below the whole query bar */
-.logs-query-preview {
-  display: flex; align-items: center; gap: 10px;
-  padding: 6px 16px; margin: 6px 0 16px;
-  background: var(--panel); border: 1px solid var(--border-subtle);
-  border-radius: 0;
-  font-size: 11px; color: var(--text-secondary);
-}
-.qb-preview-label {
-  font-family: 'Rubik', sans-serif; text-transform: uppercase;
-  letter-spacing: .5px; font-size: 9.5px; color: var(--text-muted);
-  padding-right: 8px; border-right: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-}
-.qb-preview-code {
-  flex: 1; min-width: 0;
-  font-family: 'JetBrains Mono', monospace; font-size: 11px;
-  color: var(--text-primary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.qb-preview-copy {
-  background: none; border: none; padding: 4px; margin: 0;
-  color: var(--text-muted); cursor: pointer; flex-shrink: 0;
-  border-radius: 0; display: inline-flex; align-items: center;
-}
-.qb-preview-copy svg { width: 13px; height: 13px; }
-.qb-preview-copy:hover { color: var(--brand-on-muted); background: var(--panel-2); }
-
-.qb-preview-save {
-  display: inline-flex; align-items: center; gap: 5px;
-  background: var(--panel-2); border: 1px solid var(--border-panel);
-  color: var(--text-secondary); font-family: 'Rubik', sans-serif;
-  font-size: 11px; padding: 4px 10px; border-radius: 0;
-  cursor: pointer; flex-shrink: 0;
-  transition: background .12s, color .12s, border-color .12s;
-}
-.qb-preview-save svg { width: 12px; height: 12px; }
-.qb-preview-save:hover:not(:disabled) {
-  background: var(--brand-muted); color: var(--brand-on-muted);
-  border-color: rgba(59,130,246,.32);
-}
-.qb-preview-save.saved {
-  background: var(--panel); color: var(--text-muted);
-  border-color: var(--border-subtle); cursor: default;
-}
-.qb-preview-save:disabled { cursor: default; }
-
-.qb-preview-save-form {
-  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
-}
-.qb-preview-save-input {
-  background: var(--raised); border: 1px solid var(--brand);
-  color: var(--text-primary); font-family: 'Rubik', sans-serif;
-  font-size: 11px; padding: 4px 8px; border-radius: 3px;
-  width: 180px; outline: none;
-}
-.qb-preview-save-confirm {
-  background: var(--brand); color: #fff; border: none;
-  font-family: 'Rubik', sans-serif; font-size: 11px;
-  padding: 4px 10px; border-radius: 3px; cursor: pointer;
-  font-weight: 500;
-}
-.qb-preview-save-confirm:hover:not(:disabled) { background: var(--brand-hover); }
-.qb-preview-save-confirm:disabled { background: var(--panel); color: var(--text-muted); cursor: not-allowed; }
-.qb-preview-save-cancel {
-  background: none; border: none; color: var(--text-muted);
-  font-size: 15px; line-height: 1; cursor: pointer;
-  padding: 0 4px; border-radius: 3px;
-}
-.qb-preview-save-cancel:hover { color: var(--text-primary); background: var(--panel-2); }
 .qb-chip-x {
   background: none; border: none; color: var(--brand-on-muted);
   opacity: .7; cursor: pointer; font-size: 13px; line-height: 1;
@@ -1286,8 +1216,8 @@ tbody tr:hover { background: var(--panel-2); }
 .qb-chip-x:hover { opacity: 1; background: rgba(59,130,246,.16); }
 
 /* Free-text chips search the log body rather than a named field, so they get
-   their own colour and a magnifier — at a glance you can tell a text search
-   from a field filter without reading the chip. */
+   their own colour — at a glance you can tell a text search from a field
+   filter without reading the chip. */
 .qb-chip.is-freetext {
   background: color-mix(in srgb, var(--panel-2) 70%, transparent);
   border-color: var(--border-strong);
@@ -1298,7 +1228,6 @@ tbody tr:hover { background: var(--panel-2); }
 .qb-chip.is-freetext .qb-chip-op,
 .qb-chip.is-freetext .qb-chip-x { color: var(--text-secondary); }
 .qb-chip.is-freetext .qb-chip-seg:hover { background: rgba(148,163,184,.22); }
-.qb-chip-ft { opacity: .8; margin-right: 3px; font-size: 11px; line-height: 1; }
 
 /* Live reading of what is in the input, shown before it is committed. */
 .qb-interp {
@@ -1310,10 +1239,10 @@ tbody tr:hover { background: var(--panel-2); }
 .qb-interp.is-field { background: var(--brand-muted); color: var(--brand-on-muted); }
 .qb-interp.is-connector { background: var(--brand); color: #fff; }
 
-/* A connector typed ahead of its chip — dashed to read as not-yet-attached. */
-.qb-connector.is-ghost {
-  border-style: dashed; opacity: .8; cursor: default;
-}
+/* A connector typed ahead of its chip — dashed to read as not-yet-attached,
+   but still clickable to toggle, exactly like a committed one. */
+.qb-connector.is-ghost { border-style: dashed; opacity: .85; }
+.qb-connector.is-ghost:hover { opacity: 1; }
 
 /* ---------- Parenthesised groups ----------
    A group is a bracketed run of chips. The bracket has to read as structure

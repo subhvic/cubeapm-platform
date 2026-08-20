@@ -228,3 +228,34 @@ test('interpret labels a connector distinctly from free text', () => {
   assert.equal(I('OR').label, 'connector')
   assert.equal(I('and').kind, 'freetext')
 })
+
+// ---------- Free-text decoration ----------
+// Quotes and stars a user types are syntax, not characters to search for.
+
+import { deriveFreeText } from './typedQuery.js'
+
+test('quoted free text is a phrase, not a literal pair of quotes', () => {
+  assert.deepEqual(deriveFreeText('"text"'), { op: 'phrase', value: 'text', explicit: true })
+  assert.deepEqual(deriveFreeText('"sedr reds"'), { op: 'phrase', value: 'sedr reds', explicit: true })
+})
+
+test('stars map to prefix and contains', () => {
+  assert.deepEqual(deriveFreeText('text*'), { op: 'prefix', value: 'text', explicit: true })
+  assert.deepEqual(deriveFreeText('*text*'), { op: 'contains', value: 'text', explicit: true })
+})
+
+test('undecorated text is left for the user to choose', () => {
+  assert.deepEqual(deriveFreeText('text'), { op: null, value: 'text', explicit: false })
+  assert.deepEqual(deriveFreeText('sedr reds'), { op: null, value: 'sedr reds', explicit: false })
+})
+
+test('half-typed decoration is not treated as syntax yet', () => {
+  // Mid-keystroke states must not collapse to an empty or nonsense value.
+  assert.equal(deriveFreeText('"').explicit, false)
+  assert.equal(deriveFreeText('""').explicit, false)
+  assert.equal(deriveFreeText('*').explicit, false)
+  assert.equal(deriveFreeText('**').explicit, false)
+  assert.equal(deriveFreeText('"text').explicit, false)
+  // A leading star alone is not valid syntax in this grammar.
+  assert.equal(deriveFreeText('*text').explicit, false)
+})
