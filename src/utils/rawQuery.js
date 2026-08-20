@@ -247,6 +247,57 @@ function parseStreamSelector(cur) {
   return chips
 }
 
+// Parses one list of terms, stopping at `|`, end of input, or — when nested —
+// the `)` that closes it. Recurses on `(` to build group nodes.
+function parseTermList(cur, depth) {
+  const nodes = []
+  let pendingConnector = null
+
+  for (;;) {
+    cur.ws()
+    if (cur.eof) break
+    if (cur.peek() === '|') break
+    if (cur.peek() === ')') {
+      if (depth === 0) throw new QueryError('Unmatched ")" — remove it or add the opening "(".', cur.i)
+      break
+    }
+
+    // Connector between terms; absent means implicit AND.
+    if (cur.startsWith('AND') && /[\s(]/.test(cur.peek(3) ?? ' ')) { cur.i += 3; pendingConnector = 'AND'; continue }
+    if (cur.startsWith('OR') && /[\s(]/.test(cur.peek(2) ?? ' ')) { cur.i += 2; pendingConnector = 'OR'; continue }
+    if (cur.startsWith('NOT') && /[\s(]/.test(cur.peek(3) ?? ' ')) {
+      throw new QueryError('NOT is not supported by the visual builder — use != or not_in.', cur.i)
+    }
+
+    let node
+    if (cur.peek() === '(') {
+      // Unambiguous: the parens of `in (...)` / `not_in (...)` are consumed by
+      // parseOpAndValue right after a field name, so a `(` in term position
+      // can only ever open a group.
+      const openAt = cur.i
+      cur.i += 1
+      const children = parseTermList(cur, depth + 1)
+      cur.ws()
+      if (cur.peek() !== ')') throw new QueryError('Unclosed "(" — add the matching ")".', openAt)
+      cur.i += 1
+      if (children.length === 0) throw new QueryError('Empty group "()" — put a filter inside it, or remove it.', openAt)
+      // A lone child needs no bracket; this matches normalize() so the builder
+      // and the parser agree on what a well-formed tree looks like.
+      node = children.length === 1 ? children[0] : { kind: 'group', children }
+    } else {
+      const field = parseFieldName(cur)
+      if (!field) throw new QueryError(`Unexpected character "${cur.peek()}".`, cur.i)
+      const { op, value } = parseOpAndValue(cur, field)
+      node = { field, op, value }
+    }
+
+    nodes.push(nodes.length === 0 ? node : { connector: pendingConnector || 'AND', ...node })
+    pendingConnector = null
+  }
+
+  return nodes
+}
+
 // Parses the conditions head into chips. Throws QueryError on anything the
 // chip model can't represent, so callers can show the reason.
 export function parseConditions(input) {
@@ -255,7 +306,6 @@ export function parseConditions(input) {
 
   const cur = new Cursor(s)
   const chips = []
-  let pendingConnector = null
 
   cur.ws()
   if (cur.peek() === '{') {
@@ -264,29 +314,10 @@ export function parseConditions(input) {
     }
   }
 
-  for (;;) {
-    cur.ws()
-    if (cur.eof) break
-
-    if (cur.peek() === '|') break
-
-    // Connector between terms; absent means implicit AND.
-    if (cur.startsWith('AND') && /[\s(]/.test(cur.peek(3) ?? ' ')) { cur.i += 3; pendingConnector = 'AND'; continue }
-    if (cur.startsWith('OR') && /[\s(]/.test(cur.peek(2) ?? ' ')) { cur.i += 2; pendingConnector = 'OR'; continue }
-    if (cur.startsWith('NOT') && /[\s(]/.test(cur.peek(3) ?? ' ')) {
-      throw new QueryError('NOT is not supported by the visual builder — use != or not_in.', cur.i)
-    }
-    if (cur.peek() === '(' || cur.peek() === ')') {
-      throw new QueryError('Parenthesised groups are not supported by the visual builder.', cur.i)
-    }
-
-    const field = parseFieldName(cur)
-    if (!field) throw new QueryError(`Unexpected character "${cur.peek()}".`, cur.i)
-
-    const { op, value } = parseOpAndValue(cur, field)
-    const chip = { field, op, value }
-    chips.push(chips.length === 0 ? chip : { connector: pendingConnector || 'AND', ...chip })
-    pendingConnector = null
+  // A stream selector already occupies the head, so the first term after it
+  // joins with an explicit AND rather than starting the list.
+  for (const n of parseTermList(cur, 0)) {
+    chips.push(chips.length === 0 ? n : { connector: n.connector || 'AND', ...n })
   }
 
   return chips

@@ -3,19 +3,18 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, Res
 import { logRows, logVolume, logFacets, BASE_TIME } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
 import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue } from '@/components/QueryBuilder'
+import { flattenLeaves } from '@/utils/queryTree'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
-import { composeQuery, serializePipes, newStatsPipe, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
+import { composeQuery, serializePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
 import { tryParseConditions, splitQuery, replacePipeSection, validatePipeText } from '@/utils/rawQuery'
-import QueryModeToggle from '@/components/QueryModeToggle'
-import RawQueryInput from '@/components/RawQueryInput'
 import PipePill, { PipePillChip } from '@/components/PipePill'
 import AggregationPopover from '@/components/AggregationPopover'
 import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, FileText } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator } from 'lucide-react'
 
 const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
 const AGG_NUMERIC_FIELDS = new Set(FIELD_CATALOG.filter(f => f.type === 'keyword').map(f => f.field))
@@ -436,6 +435,17 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+// Wraps every occurrence of the searched terms in <mark> so a hit is findable
+// without reading the whole line. Terms arrive longest-first so an overlapping
+// short term can't chop a longer match in half.
+function highlightTerms(text, terms) {
+  if (!terms.length || !text) return text
+  const rx = new RegExp(`(${terms.map(escapeRegex).join('|')})`, 'ig')
+  const parts = String(text).split(rx)
+  // String.split with one capture group interleaves: text, match, text, match…
+  return parts.map((p, i) => (i % 2 ? <mark key={i} className="log-hit">{p}</mark> : p))
+}
+
 function downloadCSV(rows) {
   const cols = ['time', 'level', 'service', 'message', 'k8s.namespace.name', 'k8s.pod.name', 'env']
   const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`
@@ -545,7 +555,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   // 'builder' = chip UI, 'raw' = hand-written CubeAPM syntax. The pill toolbar
   // stays live in both; in raw mode its edits rewrite the pipe section of the
   // raw text rather than feeding a separate preview.
-  const [queryMode, setQueryMode] = useState('builder')
+  const [queryMode] = useState('builder')
   const [rawText, setRawText] = useState('')
   // True while the builder has an uncommitted, half-built filter chip. Drives the
   // Run button into a disabled (toned-down) state — you can't run a query that
@@ -923,6 +933,19 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     })
   }, [filters, query, effectiveChips])
 
+  // Literal strings the user is searching the message body for — the free-text
+  // chips plus the facet search box. Regex chips are left out: their value is a
+  // pattern, not the text that will appear in the line.
+  const searchTerms = useMemo(() => {
+    const terms = flattenLeaves(effectiveChips)
+      .filter(c => c.field === '_msg' && c.op !== 'regex' && c.op !== 'nregex')
+      .flatMap(c => (Array.isArray(c.value) ? c.value : [c.value]))
+      .map(v => String(v ?? '').trim())
+      .filter(Boolean)
+    if (query.trim()) terms.push(query.trim())
+    return [...new Set(terms)].sort((a, b) => b.length - a.length)
+  }, [effectiveChips, query])
+
   // The composed query string — chips + serialized pipes. Kept as one memo
   // so the preview visibility check and the copy-to-clipboard action stay
   // in sync (both hide when the query is effectively empty). In raw mode the
@@ -940,49 +963,29 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     setRawText(prev => replacePipeSection(prev, serializePipes(pipes)))
   }, [pipes, queryMode])
 
-  // Returning to the chip builder is only possible when the raw conditions are
-  // expressible as chips — parenthesised groups and NOT have no chip form. The
-  // toggle disables that direction and explains why rather than dropping filters.
-  const builderBlockedReason = useMemo(() => {
-    if (queryMode !== 'raw') return null
-    const parsed = tryParseConditions(splitQuery(rawText).conditions)
-    return parsed.ok ? null : `Can't switch back: ${parsed.error}`
-  }, [queryMode, rawText])
-
-  // Switching modes carries the query across rather than resetting it.
-  const switchMode = useCallback((next) => {
-    if (next === queryMode) return
-    if (next === 'raw') {
-      setRawText(composeQuery(chipsToString(chips), pipes))
-    } else {
-      // Only offered when the raw text parses — see the toggle's disabled state.
-      const parsed = tryParseConditions(splitQuery(rawText).conditions)
-      if (!parsed.ok) return
-      setChips(parsed.chips)
-    }
-    setQueryMode(next)
-  }, [queryMode, chips, pipes, rawText])
-
-  const modeToggle = (
-    <QueryModeToggle
-      mode={queryMode}
-      onChange={switchMode}
-      disabled={!!builderBlockedReason}
-      disabledReason={builderBlockedReason}
-    />
-  )
+  // Grouping on its own is a complete question — "how many logs per service?" —
+  // so an implied count() stands in until the user names a real aggregation.
+  // Without it the aggregator has nothing to compute and returns empty, which
+  // reads as "your grouping did nothing".
+  const effectivePipes = useMemo(() => {
+    const stats = pipes.find(p => p.kind === 'stats')
+    if (!stats || stats.functions?.length || !stats.groupBy?.length) return pipes
+    return pipes.map(p => (
+      p.id === stats.id ? { ...p, functions: [{ ...newStatsFunction(), fn: 'count' }] } : p
+    ))
+  }, [pipes])
 
   // Run the client-side aggregator whenever chips or pipes change. Anchors
    // to BASE_TIME so the mock stream (which is deterministic from BASE_TIME
    // backward) always falls inside the window.
   const aggregateResult = useMemo(() => aggregate({
-    pipes,
+    pipes: effectivePipes,
     logs: chipFilteredRows,
     getFieldValue,
     now: BASE_TIME.getTime(),
     timeRange: 60 * 60 * 1000,
     bucketCount: 30,
-  }), [pipes, chipFilteredRows])
+  }), [effectivePipes, chipFilteredRows])
 
   // Scale logVolume (production-shaped baseline) by per-level filtered ratios.
   // When no filters are active the ratios are all 1 → original chart is preserved.
@@ -1092,6 +1095,16 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           <button className="hbtn small icon-only" title="Query history" aria-label="Query history" onClick={() => setHistoryOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
           </button>
+          <button
+            className="hbtn primary run-btn"
+            title={queryMode === 'builder' && builderComposing ? 'Finish or remove the unfinished filter to run' : 'Run query'}
+            aria-label="Run query"
+            disabled={queryMode === 'builder' && builderComposing}
+            onClick={() => addRecent(chips)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
+            Run
+          </button>
         </div>
 
         <div className="pipe-toolbar">
@@ -1189,16 +1202,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
               </PipePillChip>
             )}
           </PipePill>
-          <button
-            className="hbtn primary run-btn"
-            title={queryMode === 'builder' && builderComposing ? 'Finish or remove the unfinished filter to run' : 'Run query'}
-            aria-label="Run query"
-            disabled={queryMode === 'builder' && builderComposing}
-            onClick={() => addRecent(chips)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
-            Run
-          </button>
         </div>
         <AggregationPopover
           anchorRef={aggPillRef}
@@ -1348,7 +1351,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           </div>
         </div>
 
-        {statsFunctions.length === 0 ? (<>
+        {statsFunctions.length === 0 && groupBy.length === 0 ? (<>
         {graphVisible && <div className="logs-volume">
           <div className="logs-volume-chart">
             {zoom && (
@@ -1421,7 +1424,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
                     <span className="log-hhmm">{l.timeStr}</span>
                   </span>
                 </div>
-                <span className="log-text">{l.message}</span>
+                <span className="log-text">{highlightTerms(l.message, searchTerms)}</span>
                 <span className="log-stream">
                   <span className="log-tag"><span className="k">env</span><span className="v" data-log-field="env" data-log-value={l.tags.env}>{l.tags.env}</span></span>
                   <span className="log-tag"><span className="k">log.level</span><span className="v" data-log-field="log.level" data-log-value={l.level}>{l.level}</span></span>
@@ -1453,7 +1456,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           <div className="log-detail-body" data-log-content>
             <div className="log-detail-msg">
               <div className="log-detail-key">_msg</div>
-              <div className="log-detail-val mono">{selected.message}</div>
+              <div className="log-detail-val mono">{highlightTerms(selected.message, searchTerms)}</div>
             </div>
             {Object.entries(selected.tags).map(([k, v]) => (
               <div key={k} className="log-detail-field">
