@@ -362,13 +362,13 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     const fac = FIELD_CATALOG.filter(f =>
       !q || f.field.toLowerCase().includes(q) || f.desc.toLowerCase().includes(q)
     )
-    // Anything typed that isn't itself a field name can be searched against the
-    // log body instead. When no field matches, that's the only sensible reading
-    // of the input, so the row leads the list and Enter takes it by default;
+    // Anything typed can also be searched against the log body instead — including
+    // a string that happens to spell a field name, since "service" is a plausible
+    // thing to grep the message for. When no field matches, that's the only sensible
+    // reading of the input, so the row leads the list and Enter takes it by default;
     // otherwise it sits behind the field matches as a deliberate second choice.
     const typed = text.trim()
-    const isFieldName = FIELD_CATALOG.some(f => f.field.toLowerCase() === q)
-    const freeText = typed && !isFieldName ? typed : null
+    const freeText = typed || null
     return { mode: 'fields', recents: rec, saved: sav, facets: fac, freeText, freeTextFirst: fac.length === 0 }
   }, [text, phase, composing, needsTypedValue, recents, savedQueries])
 
