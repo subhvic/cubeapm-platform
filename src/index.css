@@ -1573,7 +1573,9 @@ tbody tr:hover { background: var(--panel-2); }
 /* ── Controls strip (below query bar) ── */
 .logs-controls {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 2px 14px 14px; border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .logs-controls-left { display: flex; align-items: center; gap: 8px; }
 .logs-controls-right { display: flex; align-items: center; gap: 8px; }
