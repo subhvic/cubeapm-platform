@@ -1795,7 +1795,21 @@ tbody tr:hover { background: var(--panel-2); }
 .run-btn {
   padding: 0 18px; font-size: 12px; flex-shrink: 0;
   height: 32px; align-self: flex-start;
+  position: relative;
 }
+
+/* Results no longer update as you build, so the button has to say when the bar
+   has run ahead of the table — otherwise unrun edits look like a query that
+   did nothing. Info blue, not warning amber: nothing is wrong, there is just
+   something to run. */
+.run-btn.is-dirty::after {
+  content: ''; position: absolute; top: -3px; right: -3px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--info);
+  box-shadow: 0 0 0 2px var(--card);
+}
+
+.run-btn:disabled { opacity: .45; cursor: not-allowed; }
 
 /* Chips inside a filled pill — smaller than QueryBuilder's chips because
    they nest inside another pill and shouldn't compete visually. */

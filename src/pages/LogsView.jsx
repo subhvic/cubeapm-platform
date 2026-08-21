@@ -502,7 +502,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   // True while the builder has an uncommitted, half-built filter chip. Drives the
   // Run button into a disabled (toned-down) state — you can't run a query that
   // still has an unfinished filter in it.
-  const [builderComposing, setBuilderComposing] = useState(false)
+  const [builderBlocked, setBuilderBlocked] = useState(null)
 
   // In raw mode the text is the source of truth for filtering, so parse its
   // conditions head back into chips and surface any failure under the input.
@@ -524,6 +524,28 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const effectiveChips = queryMode === 'raw'
     ? (rawParse.ok ? rawParse.chips : lastGoodChips.current)
     : chips
+
+  // `effectiveChips` is what the QUERY BAR currently spells; `appliedChips` is
+  // what the RESULTS reflect. They are separate because re-filtering on every
+  // chip edit means, against a real backend, one request per chip — expensive
+  // and mostly wasted, since a half-built query is rarely the one wanted. A run
+  // (the Run button, or Enter in the bar) is what moves the bar's state into
+  // the results.
+  //
+  // Seeded from the default query rather than left empty, so the page still
+  // auto-loads on mount instead of showing a blank "click Search" screen.
+  const [appliedChips, setAppliedChips] = useState(effectiveChips)
+  const runQuery = () => setAppliedChips(effectiveChips)
+
+  // Whether the bar has moved on from what the table is showing. Compared by
+  // serialization so a re-render with an equal-but-new array is not "dirty".
+  const queryDirty = chipsToString(effectiveChips) !== chipsToString(appliedChips)
+
+  // A query that cannot run, and why. Raw-mode parse failures and the builder's
+  // own unfinished-filter/typing errors are the same kind of problem here.
+  const runBlocked = queryMode === 'raw'
+    ? (rawParse.ok ? null : rawParse.error)
+    : builderBlocked
   const aggPillRef = useRef(null)
   const [aggPopOpen, setAggPopOpen] = useState(false)
   const [editingFuncId, setEditingFuncId] = useState(null)   // null = create mode
@@ -675,6 +697,25 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+
+  // Re-running a past query means putting it back in the builder, not just
+  // filtering by its text: parse it into chips so the bar shows the same
+  // filters it originally ran with and the results follow from them. Pipes are
+  // reset because a history entry is a whole query — leaving a stale group-by
+  // attached would show something the entry never produced.
+  const applyHistoryQuery = useCallback((q) => {
+    const parsed = tryParseConditions(splitQuery(q).conditions)
+    if (parsed.ok) {
+      setChips(parsed.chips)
+      setPipes([])
+      setQuery('')
+    } else {
+      // Not expressible as chips — fall back to matching it against the body.
+      setQuery(q)
+    }
+    setHistoryOpen(false)
+  }, [])
+
   /* Saved-query state disabled — kept for future restoration
   const [historySaved, setHistorySaved] = useState(
     () => Object.fromEntries(QUERY_HISTORY.map(h => [h.id, h.saved]))
@@ -855,23 +896,23 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       if (query && !l.message.toLowerCase().includes(query.toLowerCase())) return false
       if (lvlSet.size && !lvlSet.has(l.level)) return false
       if (svcSet.size && !svcSet.has(l.service)) return false
-      if (effectiveChips.length && !applyChipsToLog(l, effectiveChips)) return false
+      if (appliedChips.length && !applyChipsToLog(l, appliedChips)) return false
       return true
     })
-  }, [filters, query, effectiveChips])
+  }, [filters, query, appliedChips])
 
   // Literal strings the user is searching the message body for — the free-text
   // chips plus the facet search box. Regex chips are left out: their value is a
   // pattern, not the text that will appear in the line.
   const searchTerms = useMemo(() => {
-    const terms = flattenLeaves(effectiveChips)
+    const terms = flattenLeaves(appliedChips)
       .filter(c => c.field === '_msg' && c.op !== 'regex' && c.op !== 'nregex')
       .flatMap(c => (Array.isArray(c.value) ? c.value : [c.value]))
       .map(v => String(v ?? '').trim())
       .filter(Boolean)
     if (query.trim()) terms.push(query.trim())
     return [...new Set(terms)].sort((a, b) => b.length - a.length)
-  }, [effectiveChips, query])
+  }, [appliedChips, query])
 
   // Pill edits in raw mode rewrite only the pipe section, leaving the
   // hand-written conditions head untouched. Writing the same string back is a
@@ -910,10 +951,10 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   // When filters are active each level's bar shrinks proportionally to how many
   // rows in that minute match the filter, keeping the production-like visual shape.
   const filteredVolume = useMemo(() => {
-    // effectiveChips, not chips — in raw mode the active filter comes from the
-    // parsed raw text and `chips` is empty, which would short-circuit to the
-    // unfiltered baseline and desync the chart from the table.
-    const hasFilters = effectiveChips.length > 0 || !!query || Object.values(filters).some(s => s?.size)
+    // appliedChips, not chips — the chart must agree with the table, and in raw
+    // mode `chips` is empty anyway (the active filter comes from parsed raw
+    // text), which would short-circuit to the unfiltered baseline.
+    const hasFilters = appliedChips.length > 0 || !!query || Object.values(filters).some(s => s?.size)
     if (!hasFilters) return logVolume
 
     const now = BASE_TIME.getTime()
@@ -937,7 +978,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       const error = all.error > 0 ? Math.round(d.error * filt.error / all.error) : 0
       return { ...d, info, warn, error, total: info + warn + error }
     })
-  }, [chipFilteredRows, filters, query, effectiveChips])
+  }, [chipFilteredRows, filters, query, appliedChips])
 
   const filtered = useMemo(() => {
     let rows = chipFilteredRows
@@ -1006,18 +1047,18 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             setChips={setChips}
             recents={recents}
             addRecent={addRecent}
-            onRun={() => { /* results already reactive; kept as an explicit signal */ }}
-            onComposingChange={setBuilderComposing}
+            onRun={runQuery}
+            onBlockedChange={setBuilderBlocked}
           />
           <button className="hbtn small icon-only" title="Query history" aria-label="Query history" onClick={() => setHistoryOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
           </button>
           <button
-            className="hbtn primary run-btn"
-            title={queryMode === 'builder' && builderComposing ? 'Finish or remove the unfinished filter to run' : 'Run query'}
+            className={`hbtn primary run-btn${queryDirty && !runBlocked ? ' is-dirty' : ''}`}
+            title={runBlocked || (queryDirty ? 'Run query — the bar has changes the results do not show yet' : 'Run query')}
             aria-label="Run query"
-            disabled={queryMode === 'builder' && builderComposing}
-            onClick={() => addRecent(chips)}
+            disabled={!!runBlocked}
+            onClick={() => { addRecent(chips); runQuery() }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
             Run
@@ -1345,7 +1386,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     {historyOpen && (
       <QueryHistoryDrawer
         onClose={() => setHistoryOpen(false)}
-        onApply={(q) => { setQuery(q); setHistoryOpen(false) }}
+        onApply={applyHistoryQuery}
       />
     )}
 

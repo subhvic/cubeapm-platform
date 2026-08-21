@@ -365,7 +365,7 @@ export function applyChipsToLog(log, chips) {
 
 // ---------- Component ----------
 
-export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onComposingChange, leading }) {
+export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onBlockedChange, leading }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   // null → field phase | { field, type, highCard } → operator phase | { …, op } → value phase
@@ -431,10 +431,9 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   // reflect it on the Run button. A trip is incomplete until it commits to a chip
   // (composing → null) or is cancelled. Always clear on unmount (e.g. switching
   // away from builder mode) so a stale signal doesn't linger.
-  // Only a *new* half-built chip blocks Run. An in-flight edit doesn't: the
-  // original chip is still in `chips` and still valid, so the query is runnable.
-  useEffect(() => { onComposingChange?.(!!composing && !isEditing) }, [composing, isEditing, onComposingChange])
-  useEffect(() => () => onComposingChange?.(false), [onComposingChange])
+  // What blocks Run is reported as a reason string (see `blockedReason` below,
+  // computed once the error messages it draws on exist). Null means runnable.
+  useEffect(() => () => onBlockedChange?.(null), [onBlockedChange])
 
   const suggestions = useMemo(() => {
     const q = text.trim().toLowerCase()
@@ -915,6 +914,11 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     if (e.key === 'Backspace' && !text) {
       e.preventDefault(); stepBack(); return
     }
+    // With the overlay closed there is no suggestion for Enter to take, so it
+    // means the only other thing it can mean: run what is in the bar.
+    if (!open && e.key === 'Enter') {
+      e.preventDefault(); addRecent?.(chips); onRun?.(); return
+    }
     if (!open) return
 
     if (e.key === 'ArrowDown') {
@@ -1114,6 +1118,18 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
       : isMulti
         ? `Unfinished filter — pick at least one value for “${composing.field}”, or remove it.`
         : `Unfinished filter — add a value for “${composing.field}”, or remove it.`
+
+  // Everything that makes the current query un-runnable, as one reason string.
+  // The Run button both disables on it and shows it as its tooltip, so the user
+  // is told *why* rather than being left with a dead control. Only a *new*
+  // half-built chip counts: an in-flight edit leaves the original chip in
+  // `chips`, still valid, so the query stays runnable.
+  const blockedReason = spaceError || incompleteMessage || (
+    composing && !isEditing
+      ? `Unfinished filter on “${composing.field}” — finish it or remove it to run.`
+      : null
+  )
+  useEffect(() => { onBlockedChange?.(blockedReason) }, [blockedReason, onBlockedChange])
 
   // Shows a typed `AND`/`OR` in the slot it will occupy, so the connector is
   // visible before the chip it belongs to exists.
@@ -1602,7 +1618,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
             {isMulti
               ? <><span><kbd>↵</kbd> Toggle</span><span><kbd>Tab</kbd> Commit</span></>
               : <><span><kbd>Tab</kbd> Insert &amp; continue</span><span><kbd>↵</kbd> Commit</span></>}
-            <span><kbd>⌫</kbd> Back</span>
+            <span><kbd>Backspace</kbd> Back</span>
             <span><kbd>Esc</kbd> Dismiss</span>
           </div>
         </div>
