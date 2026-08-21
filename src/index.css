@@ -2309,11 +2309,6 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
   cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px;
 }
 .qh-save-cancel:hover { color: var(--text-primary); }
-.qh-item-actions { display: inline-flex; gap: 4px; }
-.qh-action-tag {
-  font-size: 9.5px; color: var(--text-muted); background: var(--panel);
-  border: 1px solid var(--border-subtle); border-radius: 3px; padding: 1px 6px;
-}
 
 /* hbtn with icon+text */
 .hbtn svg { width: 13px; height: 13px; margin-right: 2px; vertical-align: -1px; }
