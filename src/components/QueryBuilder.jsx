@@ -290,6 +290,31 @@ function tokenize(s) {
   return s.toLowerCase().split(/[^a-z0-9._-]+/i).filter(Boolean)
 }
 
+// A phrase matches a run of WHOLE tokens, in order. `"proces"` matches the word
+// "proces" and not "processing" — matching inside a word is what `*proces*` is
+// for, and treating a phrase as a substring made the narrowest of the three
+// free-text readings behave exactly like the widest.
+function matchesPhrase(haystack, value) {
+  const hay = tokenize(haystack)
+  const needle = tokenize(value)
+  if (!needle.length) return false
+  for (let i = 0; i + needle.length <= hay.length; i++) {
+    if (needle.every((w, j) => hay[i + j] === w)) return true
+  }
+  return false
+}
+
+// `text*` reads as "starting with": either the value as a whole starts with it
+// (`http.status:5*` covering 5xx) or some word inside does (`proces*` finding
+// "processing" in a message). The second is why this is not just startsWith —
+// a message body is many words, and only the first would ever match.
+function matchesPrefix(haystack, value) {
+  const hl = haystack.toLowerCase()
+  const vl = value.toLowerCase()
+  if (!vl) return false
+  return hl.startsWith(vl) || tokenize(haystack).some(t => t.startsWith(vl))
+}
+
 function matchChip(log, c) {
   const raw = getFieldValue(log, c.field)
   const present = raw != null && raw !== ''
@@ -307,8 +332,8 @@ function matchChip(log, c) {
     case 'in':       return asArray(c.value).map(String).includes(s)
     case 'not_in':   return !asArray(c.value).map(String).includes(s)
     case 'contains': return sl.includes(vl)
-    case 'prefix':   return sl.startsWith(vl)
-    case 'phrase':   return sl.includes(vl)
+    case 'prefix':   return matchesPrefix(s, v)
+    case 'phrase':   return matchesPhrase(s, v)
     case 'regex':    { try { return new RegExp(v).test(s) } catch { return false } }
     case 'nregex':   { try { return !new RegExp(v).test(s) } catch { return false } }
     default: return false
@@ -850,6 +875,17 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
       setHighlight(0)
       return 'advance'
     }
+
+    // Free-text syntax the user wrote out themselves is a finished term the
+    // moment it closes — `"a b"`, `pay*`, `*pay*` — so a space commits the pill
+    // it spells, exactly as it would for a typed field filter. Undecorated text
+    // stays open, because a space there is just the next word.
+    const ft = deriveFreeText(text)
+    if (ft.explicit) {
+      commitChip({ field: '_msg', op: ft.op, value: ft.value })
+      return 'advance'
+    }
+
     return text.trim() ? 'allow' : 'reject'
   }
 

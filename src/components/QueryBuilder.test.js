@@ -73,3 +73,39 @@ test('serialization brackets groups and keeps stream promotion for leading chips
     '{service="order"} (log.level:=error OR log.level:=warn)',
   )
 })
+
+// The three free-text readings are a narrowness ladder: exact phrase, then
+// starting-with, then anywhere. These pin the rungs apart — the reported bug
+// was that the narrowest one matched everything the widest one did.
+const msg = (message) => ({ service: 'x', level: 'info', message, tags: {} })
+const ft = (op, value) => [{ field: '_msg', op, value }]
+
+test('a phrase matches whole words, not fragments of them', () => {
+  assert.equal(applyChipsToLog(msg('proces failed'), ft('phrase', 'proces')), true)
+  // The bug: "processing" contains "proces", but it is not the word "proces".
+  assert.equal(applyChipsToLog(msg('processing order'), ft('phrase', 'proces')), false)
+  assert.equal(applyChipsToLog(msg('PROCES failed'), ft('phrase', 'proces')), true)
+})
+
+test('a multi-word phrase needs the words consecutive and in order', () => {
+  const q = ft('phrase', 'connection refused')
+  assert.equal(applyChipsToLog(msg('got connection refused here'), q), true)
+  assert.equal(applyChipsToLog(msg('refused connection'), q), false)
+  assert.equal(applyChipsToLog(msg('connection was refused'), q), false)
+})
+
+test('starting-with matches a word prefix anywhere in the message', () => {
+  assert.equal(applyChipsToLog(msg('order processing failed'), ft('prefix', 'proces')), true)
+  assert.equal(applyChipsToLog(msg('order reprocessing failed'), ft('prefix', 'proces')), false)
+})
+
+test('starting-with still anchors a single-token field value', () => {
+  const status = { service: 'x', level: 'info', message: '', tags: { 'http.status': '503' } }
+  assert.equal(applyChipsToLog(status, [{ field: 'http.status', op: 'prefix', value: '5' }]), true)
+  assert.equal(applyChipsToLog(status, [{ field: 'http.status', op: 'prefix', value: '4' }]), false)
+})
+
+test('containing still matches inside a word — that is what it is for', () => {
+  assert.equal(applyChipsToLog(msg('processing order'), ft('contains', 'proces')), true)
+  assert.equal(applyChipsToLog(msg('reprocessing'), ft('contains', 'process')), true)
+})
