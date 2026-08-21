@@ -290,6 +290,31 @@ function tokenize(s) {
   return s.toLowerCase().split(/[^a-z0-9._-]+/i).filter(Boolean)
 }
 
+// A phrase matches a run of WHOLE tokens, in order. `"proces"` matches the word
+// "proces" and not "processing" — matching inside a word is what `*proces*` is
+// for, and treating a phrase as a substring made the narrowest of the three
+// free-text readings behave exactly like the widest.
+function matchesPhrase(haystack, value) {
+  const hay = tokenize(haystack)
+  const needle = tokenize(value)
+  if (!needle.length) return false
+  for (let i = 0; i + needle.length <= hay.length; i++) {
+    if (needle.every((w, j) => hay[i + j] === w)) return true
+  }
+  return false
+}
+
+// `text*` reads as "starting with": either the value as a whole starts with it
+// (`http.status:5*` covering 5xx) or some word inside does (`proces*` finding
+// "processing" in a message). The second is why this is not just startsWith —
+// a message body is many words, and only the first would ever match.
+function matchesPrefix(haystack, value) {
+  const hl = haystack.toLowerCase()
+  const vl = value.toLowerCase()
+  if (!vl) return false
+  return hl.startsWith(vl) || tokenize(haystack).some(t => t.startsWith(vl))
+}
+
 function matchChip(log, c) {
   const raw = getFieldValue(log, c.field)
   const present = raw != null && raw !== ''
@@ -307,8 +332,8 @@ function matchChip(log, c) {
     case 'in':       return asArray(c.value).map(String).includes(s)
     case 'not_in':   return !asArray(c.value).map(String).includes(s)
     case 'contains': return sl.includes(vl)
-    case 'prefix':   return sl.startsWith(vl)
-    case 'phrase':   return sl.includes(vl)
+    case 'prefix':   return matchesPrefix(s, v)
+    case 'phrase':   return matchesPhrase(s, v)
     case 'regex':    { try { return new RegExp(v).test(s) } catch { return false } }
     case 'nregex':   { try { return !new RegExp(v).test(s) } catch { return false } }
     default: return false
@@ -340,7 +365,7 @@ export function applyChipsToLog(log, chips) {
 
 // ---------- Component ----------
 
-export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onComposingChange, leading }) {
+export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onBlockedChange, leading }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   // null → field phase | { field, type, highCard } → operator phase | { …, op } → value phase
@@ -406,10 +431,21 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   // reflect it on the Run button. A trip is incomplete until it commits to a chip
   // (composing → null) or is cancelled. Always clear on unmount (e.g. switching
   // away from builder mode) so a stale signal doesn't linger.
-  // Only a *new* half-built chip blocks Run. An in-flight edit doesn't: the
-  // original chip is still in `chips` and still valid, so the query is runnable.
-  useEffect(() => { onComposingChange?.(!!composing && !isEditing) }, [composing, isEditing, onComposingChange])
-  useEffect(() => () => onComposingChange?.(false), [onComposingChange])
+  // What blocks Run is reported as a reason string (see `blockedReason` below,
+  // computed once the error messages it draws on exist). Null means runnable.
+  useEffect(() => () => onBlockedChange?.(null), [onBlockedChange])
+
+  // Enter can finish a term and run in one press, but `setChips` does not land
+  // until the next render — running inline would run the query as it was
+  // *before* the chip it just added. So the run waits for `chips` to arrive.
+  const runAfterCommit = useRef(false)
+  useEffect(() => {
+    if (!runAfterCommit.current) return
+    runAfterCommit.current = false
+    addRecent?.(chips)
+    onRun?.()
+    closeOverlay()
+  }, [chips])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const suggestions = useMemo(() => {
     const q = text.trim().toLowerCase()
@@ -850,6 +886,17 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
       setHighlight(0)
       return 'advance'
     }
+
+    // Free-text syntax the user wrote out themselves is a finished term the
+    // moment it closes — `"a b"`, `pay*`, `*pay*` — so a space commits the pill
+    // it spells, exactly as it would for a typed field filter. Undecorated text
+    // stays open, because a space there is just the next word.
+    const ft = deriveFreeText(text)
+    if (ft.explicit) {
+      commitChip({ field: '_msg', op: ft.op, value: ft.value })
+      return 'advance'
+    }
+
     return text.trim() ? 'allow' : 'reject'
   }
 
@@ -879,6 +926,14 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     if (e.key === 'Backspace' && !text) {
       e.preventDefault(); stepBack(); return
     }
+    // With the overlay closed there is no suggestion to take, so Enter runs —
+    // guarded the same way the Run button is, so it cannot no-op silently past
+    // an error the button would have refused.
+    if (!open && e.key === 'Enter') {
+      e.preventDefault()
+      if (!blockedReason) { addRecent?.(chips); onRun?.() }
+      return
+    }
     if (!open) return
 
     if (e.key === 'ArrowDown') {
@@ -887,28 +942,36 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setHighlight(h => Math.max(h - 1, 0))
-    } else if (isMulti && e.key === 'Tab') {
-      // Tab commits the accumulated multi-value chip; Shift+Tab clears the last pending.
+    } else if (e.key === 'Tab') {
+      // Tab is the ONLY key that takes something out of the overlay. Keeping
+      // that on one key is what lets Enter mean exactly one thing.
       e.preventDefault()
-      if (e.shiftKey && pendingValues.length) setPendingValues(pendingValues.slice(0, -1))
-      else if (pendingValues.length) commitMultiValues()
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      if (flatItems.length > 0) {
-        e.preventDefault()
+      if (isMulti) {
+        // Shift+Tab steps back through the values picked so far.
+        if (e.shiftKey && pendingValues.length) setPendingValues(pendingValues.slice(0, -1))
+        else if (flatItems.length > 0) commitItem(flatItems[highlight])
+      } else if (flatItems.length > 0) {
         commitItem(flatItems[highlight])
       } else if (needsTypedValue && text.trim()) {
-        e.preventDefault()
         commitTypedValue()
-      } else if (typedView.kind === 'complete' && commitTyped()) {
+      } else if (typedView.kind === 'complete') {
         // A typed value that matches no known one is still valid — the picklist
         // only shows values already seen in the data.
-        e.preventDefault()
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        addRecent?.(chips)
-        onRun?.()
-        closeOverlay()
+        commitTyped()
       }
+    } else if (e.key === 'Enter') {
+      // Enter runs the query. It never reaches into the overlay — a highlighted
+      // suggestion is Tab's to take. What it will do first is close off whatever
+      // the user built themselves, so that a half-finished term is carried into
+      // the run rather than silently dropped (or left blocking it).
+      e.preventDefault()
+      const committed =
+        isMulti && pendingValues.length ? (commitMultiValues(), true)
+        : needsTypedValue && text.trim() ? (commitTypedValue(), true)
+        : typedView.kind === 'complete' ? commitTyped()
+        : false
+      if (committed) runAfterCommit.current = true
+      else if (!blockedReason) { addRecent?.(chips); onRun?.(); closeOverlay() }
     } else if (e.key === 'Escape') {
       e.preventDefault()
       closeOverlay()
@@ -1078,6 +1141,18 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
       : isMulti
         ? `Unfinished filter — pick at least one value for “${composing.field}”, or remove it.`
         : `Unfinished filter — add a value for “${composing.field}”, or remove it.`
+
+  // Everything that makes the current query un-runnable, as one reason string.
+  // The Run button both disables on it and shows it as its tooltip, so the user
+  // is told *why* rather than being left with a dead control. Only a *new*
+  // half-built chip counts: an in-flight edit leaves the original chip in
+  // `chips`, still valid, so the query stays runnable.
+  const blockedReason = spaceError || incompleteMessage || (
+    composing && !isEditing
+      ? `Unfinished filter on “${composing.field}” — finish it or remove it to run.`
+      : null
+  )
+  useEffect(() => { onBlockedChange?.(blockedReason) }, [blockedReason, onBlockedChange])
 
   // Shows a typed `AND`/`OR` in the slot it will occupy, so the connector is
   // visible before the chip it belongs to exists.
@@ -1564,9 +1639,9 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
           <div className="qb-ov-foot">
             <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
             {isMulti
-              ? <><span><kbd>↵</kbd> Toggle</span><span><kbd>Tab</kbd> Commit</span></>
-              : <><span><kbd>Tab</kbd> Insert &amp; continue</span><span><kbd>↵</kbd> Commit</span></>}
-            <span><kbd>⌫</kbd> Back</span>
+              ? <><span><kbd>Tab</kbd> Toggle value</span><span><kbd>↵</kbd> Done &amp; run</span></>
+              : <><span><kbd>Tab</kbd> Insert &amp; continue</span><span><kbd>↵</kbd> Run query</span></>}
+            <span><kbd>Backspace</kbd> Back</span>
             <span><kbd>Esc</kbd> Dismiss</span>
           </div>
         </div>
