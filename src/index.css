@@ -1776,7 +1776,7 @@ tbody tr:hover { background: var(--panel-2); }
    alike, so wrapped rows keep the toolbar's rhythm. */
 .pipe-toolbar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-  padding: 4px 14px 8px;
+  padding: 4px 14px 14px;
 }
 
 .pipe-pill {
