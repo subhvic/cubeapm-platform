@@ -1549,6 +1549,27 @@ tbody tr:hover { background: var(--panel-2); }
 .hbtn.small.icon-only { padding: 4px 7px; }
 .hbtn.small.icon-only svg { margin-right: 0; }
 
+/* Overflow menu at the end of the query bar. The wrapper takes the flex slot so
+   the button inside still picks up the shared 32×32 icon-only sizing, and gives
+   the popover something to anchor to. */
+.logs-more-wrap { position: relative; flex-shrink: 0; align-self: flex-start; }
+.logs-more-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  min-width: 210px; padding: 5px;
+  background: var(--raised); border: 1px solid var(--border-panel);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-dropdown);
+}
+.logs-more-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 7px 9px; border-radius: 5px;
+  background: none; border: none; text-align: left; text-decoration: none;
+  color: var(--text-secondary); font-family: inherit; font-size: 12.5px;
+  white-space: nowrap; cursor: pointer;
+}
+.logs-more-item:hover { background: var(--panel-2); color: var(--text-primary); }
+.logs-more-item svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--text-muted); }
+.logs-more-item:hover svg { color: var(--text-secondary); }
+
 /* ── Controls strip (below query bar) ── */
 .logs-controls {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -1753,7 +1774,7 @@ tbody tr:hover { background: var(--panel-2); }
    alike, so wrapped rows keep the toolbar's rhythm. */
 .pipe-toolbar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-  padding: 8px 14px;
+  padding: 4px 14px 8px;
 }
 
 .pipe-pill {
