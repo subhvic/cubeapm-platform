@@ -435,6 +435,18 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   // computed once the error messages it draws on exist). Null means runnable.
   useEffect(() => () => onBlockedChange?.(null), [onBlockedChange])
 
+  // Enter can finish a term and run in one press, but `setChips` does not land
+  // until the next render — running inline would run the query as it was
+  // *before* the chip it just added. So the run waits for `chips` to arrive.
+  const runAfterCommit = useRef(false)
+  useEffect(() => {
+    if (!runAfterCommit.current) return
+    runAfterCommit.current = false
+    addRecent?.(chips)
+    onRun?.()
+    closeOverlay()
+  }, [chips])   // eslint-disable-line react-hooks/exhaustive-deps
+
   const suggestions = useMemo(() => {
     const q = text.trim().toLowerCase()
 
@@ -914,10 +926,13 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     if (e.key === 'Backspace' && !text) {
       e.preventDefault(); stepBack(); return
     }
-    // With the overlay closed there is no suggestion for Enter to take, so it
-    // means the only other thing it can mean: run what is in the bar.
+    // With the overlay closed there is no suggestion to take, so Enter runs —
+    // guarded the same way the Run button is, so it cannot no-op silently past
+    // an error the button would have refused.
     if (!open && e.key === 'Enter') {
-      e.preventDefault(); addRecent?.(chips); onRun?.(); return
+      e.preventDefault()
+      if (!blockedReason) { addRecent?.(chips); onRun?.() }
+      return
     }
     if (!open) return
 
@@ -927,28 +942,36 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setHighlight(h => Math.max(h - 1, 0))
-    } else if (isMulti && e.key === 'Tab') {
-      // Tab commits the accumulated multi-value chip; Shift+Tab clears the last pending.
+    } else if (e.key === 'Tab') {
+      // Tab is the ONLY key that takes something out of the overlay. Keeping
+      // that on one key is what lets Enter mean exactly one thing.
       e.preventDefault()
-      if (e.shiftKey && pendingValues.length) setPendingValues(pendingValues.slice(0, -1))
-      else if (pendingValues.length) commitMultiValues()
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      if (flatItems.length > 0) {
-        e.preventDefault()
+      if (isMulti) {
+        // Shift+Tab steps back through the values picked so far.
+        if (e.shiftKey && pendingValues.length) setPendingValues(pendingValues.slice(0, -1))
+        else if (flatItems.length > 0) commitItem(flatItems[highlight])
+      } else if (flatItems.length > 0) {
         commitItem(flatItems[highlight])
       } else if (needsTypedValue && text.trim()) {
-        e.preventDefault()
         commitTypedValue()
-      } else if (typedView.kind === 'complete' && commitTyped()) {
+      } else if (typedView.kind === 'complete') {
         // A typed value that matches no known one is still valid — the picklist
         // only shows values already seen in the data.
-        e.preventDefault()
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        addRecent?.(chips)
-        onRun?.()
-        closeOverlay()
+        commitTyped()
       }
+    } else if (e.key === 'Enter') {
+      // Enter runs the query. It never reaches into the overlay — a highlighted
+      // suggestion is Tab's to take. What it will do first is close off whatever
+      // the user built themselves, so that a half-finished term is carried into
+      // the run rather than silently dropped (or left blocking it).
+      e.preventDefault()
+      const committed =
+        isMulti && pendingValues.length ? (commitMultiValues(), true)
+        : needsTypedValue && text.trim() ? (commitTypedValue(), true)
+        : typedView.kind === 'complete' ? commitTyped()
+        : false
+      if (committed) runAfterCommit.current = true
+      else if (!blockedReason) { addRecent?.(chips); onRun?.(); closeOverlay() }
     } else if (e.key === 'Escape') {
       e.preventDefault()
       closeOverlay()
@@ -1616,8 +1639,8 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
           <div className="qb-ov-foot">
             <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
             {isMulti
-              ? <><span><kbd>↵</kbd> Toggle</span><span><kbd>Tab</kbd> Commit</span></>
-              : <><span><kbd>Tab</kbd> Insert &amp; continue</span><span><kbd>↵</kbd> Commit</span></>}
+              ? <><span><kbd>Tab</kbd> Toggle value</span><span><kbd>↵</kbd> Done &amp; run</span></>
+              : <><span><kbd>Tab</kbd> Insert &amp; continue</span><span><kbd>↵</kbd> Run query</span></>}
             <span><kbd>Backspace</kbd> Back</span>
             <span><kbd>Esc</kbd> Dismiss</span>
           </div>
