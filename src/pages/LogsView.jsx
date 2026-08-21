@@ -224,18 +224,18 @@ function FieldsDropdown({ activeFields, setActiveFields }) {
 const QUERY_HISTORY = (() => {
   const now = BASE_TIME.getTime()
   return [
-    { id: 1, query: 'service:payment AND log.level:error', time: new Date(now - 4 * 60000), results: 23, saved: 'Payment errors', actions: ['Created alert', 'Exported CSV'] },
-    { id: 2, query: 'http.status:5* AND service:order', time: new Date(now - 18 * 60000), results: 87, saved: null, actions: ['Shared link'] },
-    { id: 3, query: 'log.level:error', time: new Date(now - 42 * 60000), results: 119, saved: 'All errors', actions: [] },
-    { id: 4, query: '"Failed connecting to database"', time: new Date(now - 1.5 * 3600000), results: 34, saved: null, actions: ['Created alert'] },
-    { id: 5, query: 'service:search AND log.level!=info', time: new Date(now - 2.1 * 3600000), results: 56, saved: null, actions: [] },
-    { id: 6, query: 'endpoint:/v1/payment AND http.status:408', time: new Date(now - 3 * 3600000), results: 12, saved: 'Payment timeouts', actions: ['Exported CSV'] },
-    { id: 7, query: 'k8s.namespace.name:production AND log.level:warn', time: new Date(now - 5 * 3600000), results: 203, saved: null, actions: [] },
-    { id: 8, query: 'trace_id:abc123*', time: new Date(now - 7 * 3600000), results: 8, saved: null, actions: ['Opened trace'] },
-    { id: 9, query: 'service:shipment AND "timeout"', time: new Date(now - 12 * 3600000), results: 41, saved: 'Shipment timeouts', actions: ['Created alert', 'Shared link'] },
-    { id: 10, query: 'log.exception.type:NullPointerException', time: new Date(now - 18 * 3600000), results: 15, saved: null, actions: [] },
-    { id: 11, query: 'path:/v1/order AND log.level:error', time: new Date(now - 24 * 3600000), results: 67, saved: null, actions: ['Exported CSV'] },
-    { id: 12, query: 'service:payment AND "Transaction committed"', time: new Date(now - 36 * 3600000), results: 340, saved: null, actions: [] },
+    { id: 1, query: 'service:payment AND log.level:error', time: new Date(now - 4 * 60000), results: 23, saved: 'Payment errors' },
+    { id: 2, query: 'http.status:5* AND service:order', time: new Date(now - 18 * 60000), results: 87, saved: null },
+    { id: 3, query: 'log.level:error', time: new Date(now - 42 * 60000), results: 119, saved: 'All errors' },
+    { id: 4, query: '"Failed connecting to database"', time: new Date(now - 1.5 * 3600000), results: 34, saved: null },
+    { id: 5, query: 'service:search AND log.level!=info', time: new Date(now - 2.1 * 3600000), results: 56, saved: null },
+    { id: 6, query: 'endpoint:/v1/payment AND http.status:408', time: new Date(now - 3 * 3600000), results: 12, saved: 'Payment timeouts' },
+    { id: 7, query: 'k8s.namespace.name:production AND log.level:warn', time: new Date(now - 5 * 3600000), results: 203, saved: null },
+    { id: 8, query: 'trace_id:abc123*', time: new Date(now - 7 * 3600000), results: 8, saved: null },
+    { id: 9, query: 'service:shipment AND "timeout"', time: new Date(now - 12 * 3600000), results: 41, saved: 'Shipment timeouts' },
+    { id: 10, query: 'log.exception.type:NullPointerException', time: new Date(now - 18 * 3600000), results: 15, saved: null },
+    { id: 11, query: 'path:/v1/order AND log.level:error', time: new Date(now - 24 * 3600000), results: 67, saved: null },
+    { id: 12, query: 'service:payment AND "Transaction committed"', time: new Date(now - 36 * 3600000), results: 340, saved: null },
   ]
 })()
 
@@ -250,14 +250,29 @@ function formatHistoryTime(d) {
 
 // `savedNames` maps history id → saved name (or null). It's owned by LogsView so
 // a save survives closing the drawer; QUERY_HISTORY only seeds the initial values.
-function QueryHistoryDrawer({ onClose, onApply /*, savedNames, onToggleSave — disabled, kept for future restoration */ }) {
+function QueryHistoryDrawer({ onClose, onApply, savedNames, onToggleSave }) {
   const [search, setSearch] = useState('')
+  const [tab, setTab] = useState('all')
+  // id currently being named, plus the in-progress text. null = nobody naming.
+  const [naming, setNaming] = useState(null)
+  const [namingText, setNamingText] = useState('')
+
+  const savedNameFor = (h) => savedNames?.[h.id] ?? null
 
   const items = QUERY_HISTORY.filter(h => {
-    if (search && !h.query.toLowerCase().includes(search.toLowerCase())) return false
+    const saved = savedNameFor(h)
+    if (tab === 'saved' && !saved) return false
+    if (search && !h.query.toLowerCase().includes(search.toLowerCase()) && !(saved && saved.toLowerCase().includes(search.toLowerCase()))) return false
     return true
   })
 
+  const beginSave = (h) => { setNaming(h.id); setNamingText('') }
+  const commitSave = (h) => {
+    // An empty name still saves — the query itself is the fallback label.
+    onToggleSave(h.id, namingText.trim() || h.query)
+    setNaming(null)
+    setNamingText('')
+  }
   return (
     <div className="alert-drawer-overlay" onClick={onClose}>
       <aside className="alert-drawer qh-drawer" onClick={e => e.stopPropagation()}>
@@ -275,34 +290,72 @@ function QueryHistoryDrawer({ onClose, onApply /*, savedNames, onToggleSave — 
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
             <input placeholder="Search queries…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          {/* Saved tab disabled — kept for future restoration
           <div className="qh-tabs">
             <button className={`qh-tab${tab === 'all' ? ' active' : ''}`} onClick={() => setTab('all')}>All</button>
             <button className={`qh-tab${tab === 'saved' ? ' active' : ''}`} onClick={() => setTab('saved')}>Saved</button>
           </div>
-          */}
         </div>
         <div className="qh-list">
           {items.length === 0 && (
             <div className="qh-empty">No queries match your search</div>
           )}
-          {items.map(h => (
+          {items.map(h => {
+            const saved = savedNameFor(h)
+            const isNaming = naming === h.id
+            return (
               <div key={h.id} className="qh-item" onClick={() => onApply(h.query)}>
                 <div className="qh-item-top">
                   <code className="qh-item-query">{h.query}</code>
                   <span className="qh-item-time">{formatHistoryTime(h.time)}</span>
+                  {/* Row click applies the query, so every control here stops
+                      propagation or the drawer would close underneath it. */}
+                  <button
+                    type="button"
+                    className={`qh-save-btn${saved ? ' is-saved' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (saved) onToggleSave(h.id, null)
+                      else beginSave(h)
+                    }}
+                    title={saved ? `Unsave "${saved}"` : 'Save this query'}
+                    aria-label={saved ? `Unsave ${saved}` : 'Save this query'}
+                    aria-pressed={!!saved}
+                  >
+                    <svg viewBox="0 0 24 24" fill={saved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+                  </button>
                 </div>
+
+                {isNaming && (
+                  <form
+                    className="qh-save-form"
+                    onClick={(e) => e.stopPropagation()}
+                    onSubmit={(e) => { e.preventDefault(); commitSave(h) }}
+                  >
+                    <input
+                      autoFocus
+                      className="qh-save-input"
+                      placeholder="Name this query…"
+                      value={namingText}
+                      onChange={(e) => setNamingText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setNaming(null) } }}
+                    />
+                    <button type="submit" className="qh-save-confirm">Save</button>
+                    <button type="button" className="qh-save-cancel" onClick={() => setNaming(null)} aria-label="Cancel">×</button>
+                  </form>
+                )}
 
                 <div className="qh-item-meta">
                   <span className="qh-item-results">{h.results.toLocaleString()} results</span>
-                  {h.actions.length > 0 && (
-                    <span className="qh-item-actions">
-                      {h.actions.map(a => <span key={a} className="qh-action-tag">{a}</span>)}
+                  {saved && (
+                    <span className="qh-item-saved">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+                      {saved}
                     </span>
                   )}
                 </div>
               </div>
-          ))}
+            )
+          })}
         </div>
       </aside>
     </div>
@@ -697,6 +750,14 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // Saved names for history rows, keyed by id and seeded from the mock history.
+  // Lives here rather than in the drawer so a save outlives closing it.
+  const [historySaved, setHistorySaved] = useState(
+    () => Object.fromEntries(QUERY_HISTORY.map(h => [h.id, h.saved]))
+  )
+  const toggleHistorySave = useCallback((id, name) => {
+    setHistorySaved(prev => ({ ...prev, [id]: name }))
+  }, [])
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef(null)
 
@@ -725,14 +786,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     setHistoryOpen(false)
   }, [])
 
-  /* Saved-query state disabled — kept for future restoration
-  const [historySaved, setHistorySaved] = useState(
-    () => Object.fromEntries(QUERY_HISTORY.map(h => [h.id, h.saved]))
-  )
-  const toggleHistorySave = useCallback((id, name) => {
-    setHistorySaved(prev => ({ ...prev, [id]: name }))
-  }, [])
-  */
   const [zoom, setZoom] = useState(null)
   const [dragBrush, setDragBrush] = useState(null)
   // Text-selection context menu: { x, y, text, field, value } | null
@@ -1431,6 +1484,8 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       <QueryHistoryDrawer
         onClose={() => setHistoryOpen(false)}
         onApply={applyHistoryQuery}
+        savedNames={historySaved}
+        onToggleSave={toggleHistorySave}
       />
     )}
 
