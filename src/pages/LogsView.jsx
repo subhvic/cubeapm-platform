@@ -697,6 +697,15 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreRef = useRef(null)
+
+  useEffect(() => {
+    if (!moreOpen) return
+    const handler = (e) => { if (!moreRef.current?.contains(e.target)) setMoreOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [moreOpen])
 
   // Re-running a past query means putting it back in the builder, not just
   // filtering by its text: parse it into chips so the bar shows the same
@@ -1063,6 +1072,41 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
             Run
           </button>
+          <div className="logs-more-wrap" ref={moreRef}>
+            <button
+              className="hbtn small icon-only"
+              title="More actions"
+              aria-label="More actions"
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen(o => !o)}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+            </button>
+            {moreOpen && (
+              <div className="logs-more-menu" role="menu">
+                <button role="menuitem" className="logs-more-item" onClick={() => { downloadCSV(filtered); setMoreOpen(false) }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Download CSV
+                </button>
+                <button role="menuitem" className="logs-more-item" onClick={() => { setAlertOpen(true); setMoreOpen(false) }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 10a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 004 0"/><line x1="12" y1="2" x2="12" y2="4"/></svg>
+                  Create Alert
+                </button>
+                <a
+                  role="menuitem"
+                  className="logs-more-item"
+                  href="https://docs.cubeapm.com/logs/querying"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setMoreOpen(false)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  Learn about Querying
+                </a>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="pipe-toolbar">
