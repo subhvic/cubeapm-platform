@@ -10,6 +10,8 @@ import {
   composeQuery,
   validatePipe,
   namesInScopeBefore,
+  parsePipeStage,
+  parsePipes,
 } from './pipes.js'
 
 const tests = []
@@ -262,6 +264,100 @@ test('namesInScopeBefore: collects preceding stats and math aliases', () => {
 })
 
 // ---------- Runner ----------
+
+
+// ---------- Parsing ----------
+// The contract: anything the builder can emit parses back to a pipe that
+// serializes identically. If a serializer changes without the parser, this
+// fails rather than silently dropping part of a pasted query.
+
+const ROUND_TRIP = [
+  'stats count()',
+  'stats count_uniq(service)',
+  'stats by ("service") count()',
+  'stats by ("service", "env") count(), avg(duration_ms)',
+  'stats quantile(0.9, duration_ms)',
+  'stats by ("env") quantile(0.95, duration_ms) as "p95", count()',
+  'stats avg(duration_ms) if (log.level:error) as "slow errors"',
+  'math a / b as ratio',
+  'math a / b',
+  'math (errors / total) * 100 as "error rate"',
+  'sort ("duration_ms") desc',
+  'sort ("duration_ms")',
+  'limit 100',
+  'limit 25',
+  'keep (a, b)',
+  'unpack_json',
+]
+
+for (const q of ROUND_TRIP) {
+  test(`round-trips: ${q}`, () => {
+    assert.equal(serializePipe(parsePipeStage(q)), q)
+  })
+}
+
+test('parse: group-by and functions land on the right fields', () => {
+  const p = parsePipeStage('stats by ("service", "env") quantile(0.9, duration_ms) as "p90"')
+  assert.equal(p.kind, 'stats')
+  assert.deepEqual(p.groupBy, ['service', 'env'])
+  assert.equal(p.functions.length, 1)
+  assert.equal(p.functions[0].fn, 'quantile')
+  assert.equal(p.functions[0].p, 0.9)
+  assert.equal(p.functions[0].field, 'duration_ms')
+  assert.equal(p.functions[0].as, 'p90')
+})
+
+test('parse: an if clause is captured whole, commas and all', () => {
+  const p = parsePipeStage('stats count() if (service:a AND log.level:error) as "x", avg(duration_ms)')
+  assert.equal(p.functions.length, 2)
+  assert.equal(p.functions[0].if, 'service:a AND log.level:error')
+  assert.equal(p.functions[1].fn, 'avg')
+})
+
+test('parse: sort defaults to asc when no direction is given', () => {
+  assert.equal(parsePipeStage('sort ("duration_ms")').dir, 'asc')
+  assert.equal(parsePipeStage('sort ("duration_ms") desc').dir, 'desc')
+})
+
+test('parse: a stage with no builder control is carried verbatim', () => {
+  const p = parsePipeStage('rename (a, b)')
+  assert.equal(p.kind, 'raw')
+  assert.equal(serializePipe(p), 'rename (a, b)')
+})
+
+test('parse: malformed stages report why', () => {
+  assert.throws(() => parsePipeStage('stats bogus('), /Unknown aggregation "bogus"/)
+  assert.throws(() => parsePipeStage('stats'), /at least one aggregation/)
+  assert.throws(() => parsePipeStage('limit abc'), /needs a number/)
+  assert.throws(() => parsePipeStage('frobnicate x'), /Unknown pipe "frobnicate"/)
+})
+
+test('parsePipes: reports a malformed stage without throwing', () => {
+  const r = parsePipes(['stats count()', 'limit abc'])
+  assert.equal(r.ok, false)
+  assert.match(r.error, /needs a number/)
+  assert.equal(r.fatal, undefined)
+})
+
+test('parsePipes: a repeated singleton stage is fatal', () => {
+  const r = parsePipes(['stats count()', 'stats avg(duration_ms)'])
+  assert.equal(r.ok, false)
+  assert.equal(r.fatal, true)
+  assert.match(r.error, /more than one "stats"/)
+})
+
+test('parsePipes: repeated math is fine — math is genuinely multi', () => {
+  const r = parsePipes(['math a as x', 'math b as y'])
+  assert.equal(r.ok, true)
+  assert.equal(r.pipes.length, 2)
+})
+
+test('parsePipes: names the stages it had to carry verbatim', () => {
+  const r = parsePipes(['stats count()', 'keep (a)', 'unpack_json'])
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.unsupported, ['keep', 'unpack_json'])
+  assert.equal(serializePipes(r.pipes), 'stats count() | keep (a) | unpack_json')
+})
 
 let passed = 0, failed = 0
 for (const { name, fn } of tests) {

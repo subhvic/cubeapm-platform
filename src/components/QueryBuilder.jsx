@@ -4,6 +4,7 @@ import { logRows } from '@/data/observability'
 import {
   isGroup, newGroup, getAt, replaceAt, removeAt, appendInto, normalize,
   wrapWithNeighbour, unwrapAt, toggleConnectorAt, lastLeafPath, pathEquals,
+  concatWithAnd,
 } from '@/utils/queryTree'
 import {
   splitField, resolveOperator, buildChip, isCommittable, interpret, isKnownField,
@@ -365,7 +366,7 @@ export function applyChipsToLog(log, chips) {
 
 // ---------- Component ----------
 
-export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onBlockedChange, leading }) {
+export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onBlockedChange, onCopyQuery, parsePastedQuery, onApplyPipes, leading }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   // null → field phase | { field, type, highCard } → operator phase | { …, op } → value phase
@@ -391,6 +392,9 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   const [pendingConnector, setPendingConnector] = useState(null)
   // Set when a rejected space is pressed; cleared on the next real keystroke.
   const [spaceError, setSpaceError] = useState(null)
+  // Feedback from the last paste — a refusal, a parse reason, or a note that
+  // a pipe section was ignored. Transient, cleared like spaceError.
+  const [pasteError, setPasteError] = useState(null)
   const wrapRef = useRef(null)
   const inputRef = useRef(null)
   const listRef = useRef(null)
@@ -551,6 +555,10 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
 
   // Moving to a different slot makes the last space complaint stale.
   useEffect(() => { setSpaceError(null) }, [phase, composing?.field, composing?.op, chips.length])
+  // Deliberately not keyed on chips.length: a successful paste *is* a chip
+  // change, so clearing there would wipe the note about an ignored pipe section
+  // in the same tick it was set.
+  useEffect(() => { setPasteError(null) }, [phase, composing?.field, composing?.op])
 
   useEffect(() => {
     if (!open || !listRef.current) return
@@ -916,8 +924,8 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
       if (action === 'reject') {
         e.preventDefault(); setSpaceError(spaceRejection()); return
       }
-    } else if (spaceError && e.key.length === 1) {
-      setSpaceError(null)
+    } else if ((spaceError || pasteError) && e.key.length === 1) {
+      setSpaceError(null); setPasteError(null)
     }
 
     if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
@@ -1153,6 +1161,38 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
       : null
   )
   useEffect(() => { onBlockedChange?.(blockedReason) }, [blockedReason, onBlockedChange])
+
+  // Pasting a whole query only makes sense from a clean position: a half-built
+  // chip or half-typed text has no obvious place to put the pasted tree, and
+  // guessing would be worse than refusing.
+  //
+  // Anything that doesn't parse as a query is left entirely alone — no
+  // preventDefault, no chips — so pasting a value into a value field keeps
+  // working. A bare word like `payment` has no operator and so never parses,
+  // which makes "does it parse?" the whole test.
+  const onPaste = (e) => {
+    if (!parsePastedQuery) return
+    const raw = e.clipboardData?.getData('text') ?? ''
+    if (!raw.trim()) return
+
+    const res = parsePastedQuery(raw)
+    if (!res?.ok) {
+      // The text still pastes; when it looked like a query, the parser's
+      // reason rides along so the user can see what went wrong.
+      if (res?.error) setPasteError(res.error)
+      return
+    }
+
+    e.preventDefault()
+    const inProgress = blockedReason
+      || (composing ? `Finish or remove the filter on “${composing.field}” before pasting a query.` : null)
+      || (text.trim() ? 'Clear the text in the query bar before pasting a query.' : null)
+    if (inProgress) { setPasteError(inProgress); return }
+
+    setChips(concatWithAnd(chips, res.chips))
+    if (res.pipes) onApplyPipes?.(res.pipes)
+    setPasteError(res.notice ?? null)
+  }
 
   // Shows a typed `AND`/`OR` in the slot it will occupy, so the connector is
   // visible before the chip it belongs to exists.
@@ -1391,6 +1431,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
           onChange={(e) => onTextChange(e.target.value)}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           placeholder={placeholder}
           spellCheck={false}
           autoComplete="off"
@@ -1409,6 +1450,21 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
           </span>
         )}
 
+        {/* Sits left of the × so the destructive control stays the last thing
+            in the row. onMouseDown is swallowed to keep input focus. */}
+        {onCopyQuery && (
+          <button
+            type="button"
+            className="qb-copy-query"
+            onClick={onCopyQuery}
+            onMouseDown={(e) => e.preventDefault()}
+            title="Copy query to clipboard"
+            aria-label="Copy query to clipboard"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </button>
+        )}
+
         {chips.length > 0 && (
           <button
             type="button"
@@ -1423,10 +1479,10 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
         )}
       </div>
 
-      {(spaceError || incompleteMessage) && (
+      {(pasteError || spaceError || incompleteMessage) && (
         <div className="qb-composing-error" role="alert">
           <AlertCircle size={12} strokeWidth={2} />
-          <span>{spaceError || incompleteMessage}</span>
+          <span>{pasteError || spaceError || incompleteMessage}</span>
         </div>
       )}
 

@@ -6,7 +6,7 @@ import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldVa
 import { flattenLeaves } from '@/utils/queryTree'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
-import { serializePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
+import { serializePipes, composeQuery, parsePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
 import { tryParseConditions, splitQuery, replacePipeSection, validatePipeText } from '@/utils/rawQuery'
 import PipePill, { PipePillChip } from '@/components/PipePill'
 import AggregationPopover from '@/components/AggregationPopover'
@@ -338,6 +338,27 @@ function presetToMinutes(tr) {
   return map[tr] ?? null
 }
 
+// Grouping on its own is a complete question — "how many logs per service?" —
+// so an implied count() stands in until the user names a real aggregation.
+// Without it the aggregator has nothing to compute and returns empty, which
+// reads as "your grouping did nothing".
+//
+// Dirty-checking runs both sides through this too: serializeStats drops a stats
+// pipe that has no functions, so a group-by on its own would otherwise look
+// byte-identical to no pipes at all and never light up the Run button.
+function withImpliedCount(pipes) {
+  const stats = pipes.find(p => p.kind === 'stats')
+  if (!stats || stats.functions?.length || !stats.groupBy?.length) return pipes
+  return pipes.map(p => (
+    p.id === stats.id ? { ...p, functions: [{ ...newStatsFunction(), fn: 'count' }] } : p
+  ))
+}
+
+// Separates "a malformed query worth explaining" from "a plain value that
+// happens not to parse". Only the former earns an error on paste — pasting a
+// service name or a URL into a value should just paste.
+const LOOKS_LIKE_QUERY = /[:(]|!=|!~|\s(?:AND|OR|in|not_in)\s/i
+
 const FILTERS_MIN_W = 232
 const FILTERS_MAX_W = Math.round(FILTERS_MIN_W * 1.6)
 
@@ -467,7 +488,7 @@ function AlertDrawer({ filters, query, onClose }) {
   )
 }
 
-export default function LogsView({ goHome, timeRange, setTimeRange }) {
+export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) {
   const [filters, setFilters] = useState({})
   const [selectedId, setSelectedId] = useState(null)
   const [query, setQuery] = useState('')
@@ -528,11 +549,18 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
   // Seeded from the default query rather than left empty, so the page still
   // auto-loads on mount instead of showing a blank "click Search" screen.
   const [appliedChips, setAppliedChips] = useState(effectiveChips)
-  const runQuery = () => setAppliedChips(effectiveChips)
+  // Pipes defer the same way. A group-by or aggregation is part of the query,
+  // not a view toggle, so picking one costs a request just like a chip does —
+  // and switching to an aggregate panel before the user has run anything shows
+  // a result they never asked for.
+  const [appliedPipes, setAppliedPipes] = useState([])
+  const runQuery = () => { setAppliedChips(effectiveChips); setAppliedPipes(pipes) }
 
   // Whether the bar has moved on from what the table is showing. Compared by
   // serialization so a re-render with an equal-but-new array is not "dirty".
-  const queryDirty = chipsToString(effectiveChips) !== chipsToString(appliedChips)
+  const queryDirty =
+    chipsToString(effectiveChips) !== chipsToString(appliedChips)
+    || serializePipes(withImpliedCount(pipes)) !== serializePipes(withImpliedCount(appliedPipes))
 
   // A query that cannot run, and why. Raw-mode parse failures and the builder's
   // own unfinished-filter/typing errors are the same kind of problem here.
@@ -723,6 +751,57 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
       setQuery(q)
     }
     setHistoryOpen(false)
+  }, [])
+
+  // rawQuery.js imports from QueryBuilder, so the builder can't import the
+  // parser back without a cycle — the parse is injected from here instead.
+  //
+  // `ok: false` with no error means "this isn't a query, it's a value": the
+  // builder lets those paste as ordinary text rather than complaining.
+  const parsePastedQuery = useCallback((raw) => {
+    const { conditions, pipes: pipeStages } = splitQuery(raw)
+    const parsed = tryParseConditions(conditions)
+    if (!parsed.ok) {
+      return { ok: false, error: LOOKS_LIKE_QUERY.test(raw) ? parsed.error : null }
+    }
+
+    const pipeRes = pipeStages.length ? parsePipes(pipeStages) : null
+    // A stage the builder can't represent at all refuses the whole paste —
+    // applying half of it would run a query the user never wrote.
+    if (pipeRes && !pipeRes.ok && pipeRes.fatal) {
+      return { ok: false, error: pipeRes.error }
+    }
+
+    const gotPipes = !!pipeRes?.ok && pipeRes.pipes.length > 0
+    if (!parsed.chips.length && !gotPipes) return { ok: false, error: null }
+
+    // A malformed pipe section still lets the filters through; the reason rides
+    // along so the user knows the pipe half didn't land.
+    // A typo in the pipe section shouldn't destroy pipe controls the user
+    // already set, so those are left as they are — the wording has to say so.
+    const notice = pipeRes && !pipeRes.ok
+      ? `Applied the filters. The pipe section was left as it is — ${pipeRes.error}`
+      : pipeRes?.unsupported?.length
+        ? `Kept ${pipeRes.unsupported.map(n => `“${n}”`).join(', ')} as written — no builder control for ${pipeRes.unsupported.length > 1 ? 'those stages' : 'that stage'}, so ${pipeRes.unsupported.length > 1 ? 'they' : 'it'} shows only in the generated query.`
+        : null
+
+    return {
+      ok: true,
+      chips: parsed.chips,
+      // Only a paste that carried a pipe section touches the pipe controls;
+      // one without leaves whatever is already configured alone.
+      pipes: gotPipes ? pipeRes.pipes : null,
+      notice,
+    }
+  }, [])
+
+  // Replaces the pipe config wholesale, so what runs is what was pasted rather
+  // than the paste plus a leftover stage. Any open math editor is pointing at a
+  // pipe that no longer exists, so it closes with it.
+  const applyPastedPipes = useCallback((next) => {
+    setPipes(next)
+    setMathPopOpen(false)
+    setEditingMathId(null)
   }, [])
 
   const [zoom, setZoom] = useState(null)
@@ -923,17 +1002,52 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
     setRawText(prev => replacePipeSection(prev, serializePipes(pipes)))
   }, [pipes, queryMode])
 
-  // Grouping on its own is a complete question — "how many logs per service?" —
-  // so an implied count() stands in until the user names a real aggregation.
-  // Without it the aggregator has nothing to compute and returns empty, which
-  // reads as "your grouping did nothing".
-  const effectivePipes = useMemo(() => {
-    const stats = pipes.find(p => p.kind === 'stats')
-    if (!stats || stats.functions?.length || !stats.groupBy?.length) return pipes
-    return pipes.map(p => (
-      p.id === stats.id ? { ...p, functions: [{ ...newStatsFunction(), fn: 'count' }] } : p
-    ))
-  }, [pipes])
+  // Reads appliedPipes, not pipes: everything downstream of here is results, and
+  // results only move on Run.
+  const effectivePipes = useMemo(() => withImpliedCount(appliedPipes), [appliedPipes])
+
+  // The live counterpart, for the generated-query preview only.
+  const livePipes = useMemo(() => withImpliedCount(pipes), [pipes])
+
+  // The applied counterparts of statsFunctions/groupBy. The pills read the live
+  // pipes so the controls stay responsive; the results panel reads these, so it
+  // keeps showing the log table until the aggregate query is actually run.
+  const appliedStatsFunctions = useMemo(
+    () => appliedPipes.filter(p => p.kind === 'stats').flatMap(p => p.functions || []),
+    [appliedPipes]
+  )
+  const appliedGroupBy = useMemo(
+    () => appliedPipes.find(p => p.kind === 'stats')?.groupBy || [],
+    [appliedPipes]
+  )
+
+  // A preview of what the bar currently spells, so it tracks every edit instead
+  // of waiting for Run — it shows the query you are about to run, which is the
+  // one worth reading while you build it. The results deliberately lag behind.
+  const composedQuery = useMemo(
+    () => livePipes.length > 0 ? composeQuery(chipsToString(effectiveChips), livePipes) : '',
+    [effectiveChips, livePipes]
+  )
+
+  // What the bar currently spells, matching the generated-query preview exactly
+  // — copying hands over the query you can see, not the one behind the results.
+  // That also means the icon shows as soon as there is anything to copy.
+  const copyableQuery = useMemo(
+    () => (queryMode === 'raw'
+      ? rawText.trim()
+      : composeQuery(chipsToString(effectiveChips), livePipes)),
+    [queryMode, rawText, effectiveChips, livePipes]
+  )
+
+  const copyQuery = useCallback(() => {
+    if (!copyableQuery) return
+    // writeText rejects rather than throws when the clipboard is blocked, so
+    // both paths need swallowing or the console fills with unhandled rejections.
+    try { navigator.clipboard.writeText(copyableQuery)?.catch(() => {}) } catch (_) {}
+    setToast?.(livePipes.length > 0
+      ? 'This query has been copied to clipboard along with pipes'
+      : 'This query has been copied to clipboard')
+  }, [copyableQuery, livePipes, setToast])
 
   // Run the client-side aggregator whenever chips or pipes change. Anchors
    // to BASE_TIME so the mock stream (which is deterministic from BASE_TIME
@@ -1050,6 +1164,9 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
             addRecent={addRecent}
             onRun={runQuery}
             onBlockedChange={setBuilderBlocked}
+            onCopyQuery={copyableQuery ? copyQuery : null}
+            parsePastedQuery={parsePastedQuery}
+            onApplyPipes={applyPastedPipes}
           />
           <button className="hbtn small icon-only" title="Query history" aria-label="Query history" onClick={() => setHistoryOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
@@ -1252,6 +1369,13 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           availableNames={mathAvailableNames}
         />
 
+        {composedQuery && (
+          <div className="logs-query-preview">
+            <span className="qb-preview-label">Generated Query</span>
+            <code className="qb-preview-code">{composedQuery}</code>
+          </div>
+        )}
+
         <div className="logs-controls">
           <div className="logs-controls-left">
             <button className={`hbtn small${!graphVisible ? ' brand-lit' : ''}`} onClick={() => setGraphVisible(v => !v)} title={graphVisible ? 'Hide graph' : 'Show graph'}>
@@ -1299,7 +1423,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange }) {
           </div>
         </div>
 
-        {statsFunctions.length === 0 && groupBy.length === 0 ? (<>
+        {appliedStatsFunctions.length === 0 && appliedGroupBy.length === 0 ? (<>
         {graphVisible && <div className="logs-volume">
           <div className="logs-volume-chart">
             {zoom && (

@@ -7,18 +7,11 @@
 // to an error, which the UI surfaces rather than silently dropping filters.
 
 import { FIELD_CATALOG, getFieldValue } from '@/components/QueryBuilder'
-import { STAT_FUNCTIONS } from '@/utils/pipes'
+import { STAT_FUNCTIONS, PIPE_NAMES, BUILDER_PIPES } from '@/utils/pipes'
 import { logRows } from '@/data/observability'
 
-// Pipes CubeAPM accepts. Only the first four have builder UI; the rest are
-// suggestion-only so raw mode doesn't pretend they don't exist.
-export const PIPE_NAMES = [
-  'stats', 'math', 'sort', 'limit',
-  'copy', 'drop', 'extract_regexp', 'join', 'keep',
-  'rename', 'replace', 'replace_regexp', 'unpack_json',
-]
-
-const BUILDER_PIPES = new Set(['stats', 'math', 'sort', 'limit'])
+// PIPE_NAMES / BUILDER_PIPES now live with the pipe model in pipes.js.
+export { PIPE_NAMES }
 
 // Built-in fields that always exist regardless of the indexed field catalog.
 export const BUILTIN_FIELDS = [

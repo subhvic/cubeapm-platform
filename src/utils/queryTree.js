@@ -221,3 +221,28 @@ export function toggleConnectorAt(nodes, path) {
   if (idx === 0) return nodes
   return replaceAt(nodes, path, setConn(n, n.connector === 'OR' ? 'AND' : 'OR'))
 }
+
+// True when any top-level sibling joins with OR.
+export function hasTopLevelOr(nodes) {
+  return (nodes ?? []).some(n => n.connector === 'OR')
+}
+
+// Joins `incoming` onto `existing` with AND — how a pasted query lands on a bar
+// that already holds chips.
+//
+// Only the incoming side can be misread. A sibling list folds strictly
+// left-to-right with no precedence, so whatever `existing` means on its own it
+// still means as the accumulated left operand. But a top-level OR arriving on
+// the right would escape: `a` + `c OR d` flattened reads as `(a AND c) OR d`,
+// matching any `d` at all. Bracketing the incoming side keeps it self-contained.
+export function concatWithAnd(existing, incoming) {
+  const left = normalize(existing ?? [])
+  const right = normalize(incoming ?? [])
+  if (!left.length) return right
+  if (!right.length) return left
+
+  const tail = hasTopLevelOr(right)
+    ? [newGroup(right, 'AND')]
+    : right.map((n, i) => (i === 0 ? setConn(n, 'AND') : n))
+  return normalize([...left, ...tail])
+}
