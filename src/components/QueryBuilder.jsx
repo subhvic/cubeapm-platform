@@ -1453,7 +1453,9 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                         onHover={() => setHighlight(idx)} onPick={() => commitItem(flatItems[idx])}
                         label={<>
                           <span className="mono">{f.field}</span>
-                          <span className="qb-ov-meta">{f.highCard ? 'high cardinality' : f.desc}</span>
+                          {(f.highCard || !['log.level', 'service', 'trace_id'].includes(f.field)) &&
+                            <span className="qb-ov-meta">{f.highCard ? 'high cardinality' : f.desc}</span>
+                          }
                         </>}
                         meta={<span className="qb-ov-type">{f.type}</span>} />
                     )
@@ -1561,8 +1563,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                   return (
                     <Row key={`v${i}`} icon="A" active={idx === highlight}
                       onHover={() => setHighlight(idx)} onPick={() => commitItem(flatItems[idx])}
-                      label={<span className="mono">{v.value}</span>}
-                      meta={<span className="mono">{v.count.toLocaleString()} logs</span>} />
+                      label={<span className="mono">{v.value}</span>} />
                   )
                 })}
               </Section>
@@ -1588,7 +1589,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
                         <span className="mono">{v.value}</span>
                         {v.custom && <span className="qb-ov-meta">custom value</span>}
                       </>}
-                      meta={v.custom ? null : <span className="mono">{v.count.toLocaleString()} logs</span>} />
+                      />
                   )
                 })}
               </Section>
