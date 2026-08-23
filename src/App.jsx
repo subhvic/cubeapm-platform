@@ -231,7 +231,7 @@ export default function App() {
                 setTimeRange={setTimeRange}
               />
             ) : isLogs ? (
-              <LogsView goHome={goHome} timeRange={timeRange} setTimeRange={setTimeRange} />
+              <LogsView goHome={goHome} timeRange={timeRange} setTimeRange={setTimeRange} setToast={setToast} />
             ) : isInfra ? (
               <InfraView
                 key={infraSource}

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import {
   isGroup, newGroup, getAt, flattenLeaves, lastLeafPath, normalize,
   replaceAt, removeAt, appendInto, wrapWithNeighbour, unwrapAt,
-  toggleConnectorAt, isAtOrUnder,
+  toggleConnectorAt, isAtOrUnder, hasTopLevelOr, concatWithAnd,
 } from './queryTree.js'
 
 const leaf = (field, value, connector) => (
@@ -182,4 +182,48 @@ test('toggleConnectorAt flips AND/OR and never touches a first sibling', () => {
   assert.equal(toggleConnectorAt(FLAT, [1])[1].connector, 'OR')
   assert.deepEqual(toggleConnectorAt(FLAT, [0]), FLAT)
   assert.equal(toggleConnectorAt(GROUPED, [0, 1])[0].children[1].connector, 'AND')
+})
+
+// ---------- concatWithAnd (pasting onto an existing bar) ----------
+
+test('hasTopLevelOr only looks at the top level', () => {
+  assert.equal(hasTopLevelOr([leaf('a', '1'), leaf('b', '2', 'OR')]), true)
+  assert.equal(hasTopLevelOr([leaf('a', '1'), leaf('b', '2', 'AND')]), false)
+  assert.equal(hasTopLevelOr([newGroup([leaf('a', '1'), leaf('b', '2', 'OR')])]), false)
+})
+
+test('concatWithAnd joins two plain lists with AND', () => {
+  const out = concatWithAnd([leaf('service', 'order')], [leaf('log.level', 'error')])
+  assert.deepEqual(out, [
+    { field: 'service', op: 'eq', value: 'order' },
+    { field: 'log.level', op: 'eq', value: 'error', connector: 'AND' },
+  ])
+})
+
+test('concatWithAnd brackets an incoming top-level OR so it cannot escape', () => {
+  const out = concatWithAnd(
+    [leaf('service', 'order')],
+    [leaf('log.level', 'error'), leaf('log.level', 'warn', 'OR')],
+  )
+  assert.equal(out.length, 2)
+  assert.equal(isGroup(out[1]), true)
+  assert.equal(out[1].connector, 'AND')
+  assert.deepEqual(out[1].children.map(n => n.value), ['error', 'warn'])
+})
+
+test('concatWithAnd leaves an existing top-level OR flat — the fold already covers it', () => {
+  const out = concatWithAnd(
+    [leaf('service', 'order'), leaf('service', 'payment', 'OR')],
+    [leaf('log.level', 'error')],
+  )
+  assert.equal(out.length, 3)
+  assert.equal(out.every(n => !isGroup(n)), true)
+  assert.equal(out[2].connector, 'AND')
+})
+
+test('concatWithAnd with an empty side returns the other, without a leading connector', () => {
+  const incoming = [leaf('log.level', 'error'), leaf('log.level', 'warn', 'OR')]
+  assert.deepEqual(concatWithAnd([], incoming), incoming)
+  assert.deepEqual(concatWithAnd(incoming, []), incoming)
+  assert.equal(concatWithAnd([], incoming)[0].connector, undefined)
 })
