@@ -14,7 +14,7 @@ import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle } from 'lucide-react'
 
 const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
 const AGG_NUMERIC_FIELDS = new Set(FIELD_CATALOG.filter(f => f.type === 'keyword').map(f => f.field))
@@ -554,7 +554,35 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
   // and switching to an aggregate panel before the user has run anything shows
   // a result they never asked for.
   const [appliedPipes, setAppliedPipes] = useState([])
-  const runQuery = () => { setAppliedChips(effectiveChips); setAppliedPipes(pipes) }
+  // Running a query is a request, even though the mock resolves in a microtask.
+  // Keeping the round trip here — rather than assigning state inline — is what
+  // lets the in-flight, stale and failed states exist at all; swapping the
+  // resolved promise for a real fetch is the whole integration.
+  const [queryState, setQueryState] = useState({ status: 'idle', error: null })
+  const runSeq = useRef(0)
+
+  const runQuery = useCallback(() => {
+    const nextChips = effectiveChips
+    const nextPipes = pipes
+    const seq = ++runSeq.current
+    setQueryState({ status: 'running', error: null })
+    Promise.resolve()
+      .then(() => {
+        // A reply from a superseded run must not overwrite a newer one.
+        if (seq !== runSeq.current) return
+        setAppliedChips(nextChips)
+        setAppliedPipes(nextPipes)
+        setQueryState({ status: 'idle', error: null })
+      })
+      .catch(err => {
+        if (seq !== runSeq.current) return
+        // The previous results stay on screen behind the message: a failed
+        // refresh is not a reason to throw away what the user was reading.
+        setQueryState({ status: 'error', error: err?.message || 'Could not run this query. Check the connection and try again.' })
+      })
+  }, [effectiveChips, pipes])
+
+  const isRunning = queryState.status === 'running'
 
   // Whether the bar has moved on from what the table is showing. Compared by
   // serialization so a re-render with an equal-but-new array is not "dirty".
@@ -1172,14 +1200,18 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
           </button>
           <button
-            className={`hbtn primary run-btn${queryDirty && !runBlocked ? ' is-dirty' : ''}`}
-            title={runBlocked || (queryDirty ? 'Run query — the bar has changes the results do not show yet' : 'Run query')}
-            aria-label="Run query"
-            disabled={!!runBlocked}
+            className={`hbtn primary run-btn${queryDirty && !runBlocked && !isRunning ? ' is-dirty' : ''}${isRunning ? ' is-running' : ''}`}
+            title={runBlocked || (isRunning ? 'Running…' : queryDirty ? 'Run query — the bar has changes the results do not show yet' : 'Run query')}
+            aria-label={isRunning ? 'Running query' : 'Run query'}
+            disabled={!!runBlocked || isRunning}
             onClick={() => { addRecent(chips); runQuery() }}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
-            Run
+            {isRunning ? (
+              <svg className="run-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
+            )}
+            {isRunning ? 'Running' : 'Run'}
           </button>
           <div className="logs-more-wrap" ref={moreRef}>
             <button
@@ -1423,6 +1455,25 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
           </div>
         </div>
 
+        {/* A failed run keeps the previous results underneath — losing what you
+            were reading because a refresh failed is worse than the failure. */}
+        {queryState.status === 'error' && (
+          <div className="logs-query-error" role="alert">
+            <AlertCircle size={14} strokeWidth={2} />
+            <span className="logs-query-error-msg">{queryState.error}</span>
+            <button type="button" className="logs-query-retry" onClick={runQuery}>Try again</button>
+            <button
+              type="button"
+              className="logs-query-error-x"
+              onClick={() => setQueryState({ status: 'idle', error: null })}
+              aria-label="Dismiss"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+        )}
+
+        <div className={`logs-results${isRunning ? ' is-stale' : ''}`} aria-busy={isRunning}>
         {appliedStatsFunctions.length === 0 && appliedGroupBy.length === 0 ? (<>
         {graphVisible && <div className="logs-volume">
           <div className="logs-volume-chart">
@@ -1512,6 +1563,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
         </>) : (
           <AggregateResults result={aggregateResult} graphVisible={graphVisible} />
         )}
+        </div>
       </div>
 
       {selected && (
