@@ -214,6 +214,10 @@ export function getFieldValue(log, field) {
   return log.tags?.[field]
 }
 
+// Long enough that arrowing through fields doesn't fire a request per step,
+// short enough that a deliberate stop feels immediate.
+const VALUE_DEBOUNCE_MS = 180
+
 function computeTopValues(field, k = 24) {
   const meta = FIELD_BY_NAME[field]
   if (meta?.highCard) return null
@@ -366,7 +370,7 @@ export function applyChipsToLog(log, chips) {
 
 // ---------- Component ----------
 
-export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onBlockedChange, onCopyQuery, parsePastedQuery, onApplyPipes, leading }) {
+export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onBlockedChange, onCopyQuery, parsePastedQuery, onApplyPipes, fetchFieldValues, leading }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   // null → field phase | { field, type, highCard } → operator phase | { …, op } → value phase
@@ -451,6 +455,54 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     closeOverlay()
   }, [chips])   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---------- Value suggestions, sync or async ----------
+  // Values arrive through `fetchFieldValues` so the builder can sit in front of
+  // a real API. Without a provider it reads the local index synchronously, which
+  // is what the mock build does — so the default path has no loading state to
+  // flicker through and existing behaviour is unchanged.
+  //
+  // `field` is stamped on the result: a reply that arrives after the user has
+  // moved to a different field describes the wrong field and must not render.
+  const [valueSource, setValueSource] = useState({ status: 'ready', field: null, items: [], error: null })
+  const [valueRetry, setValueRetry] = useState(0)
+  const retryValues = useCallback(() => setValueRetry(n => n + 1), [])
+
+  // Null unless a value list is actually on screen — high-cardinality fields
+  // take typed input instead and must never trigger a fetch.
+  const valueField = phase === 'value' && !needsTypedValue ? composing?.field ?? null : null
+
+  useEffect(() => {
+    if (!valueField) return
+    if (!fetchFieldValues) {
+      setValueSource({ status: 'ready', field: valueField, items: computeTopValues(valueField) || [], error: null })
+      return
+    }
+    let cancelled = false
+    const ctl = new AbortController()
+    setValueSource({ status: 'loading', field: valueField, items: [], error: null })
+    // Debounced so stepping through fields with the keyboard doesn't fire a
+    // request per keystroke; the abort covers the ones already in flight.
+    const timer = setTimeout(() => {
+      Promise.resolve(fetchFieldValues(valueField, { signal: ctl.signal }))
+        .then(items => {
+          if (cancelled) return
+          const list = Array.isArray(items) ? items : []
+          setValueSource({
+            status: list.length ? 'ready' : 'empty',
+            field: valueField, items: list, error: null,
+          })
+        })
+        .catch(err => {
+          if (cancelled || err?.name === 'AbortError') return
+          setValueSource({
+            status: 'error', field: valueField, items: [],
+            error: err?.message || 'Could not load values.',
+          })
+        })
+    }, VALUE_DEBOUNCE_MS)
+    return () => { cancelled = true; ctl.abort(); clearTimeout(timer) }
+  }, [valueField, fetchFieldValues, valueRetry])
+
   const suggestions = useMemo(() => {
     const q = text.trim().toLowerCase()
 
@@ -469,19 +521,27 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     }
 
     if (phase === 'value') {
+      if (needsTypedValue) return { mode: 'typed-value' }
+      // A result stamped with a different field belongs to the previous one;
+      // treat it as still loading rather than showing the wrong values.
+      const src = valueSource.field === composing.field
+        ? valueSource
+        : { status: 'loading', items: [], error: null }
+      const values = src.items || []
+      const filtered = q ? values.filter(v => v.value.toLowerCase().includes(q)) : values
+
       if (isMulti) {
-        const values = computeTopValues(composing.field) || []
-        const filtered = q ? values.filter(v => v.value.toLowerCase().includes(q)) : values
         // Offer a "custom value" row when typed text isn't in the list yet.
-        const customRow = q && !filtered.some(v => v.value.toLowerCase() === q)
+        const customRow = q && src.status === 'ready' && !filtered.some(v => v.value.toLowerCase() === q)
           ? { value: text.trim(), count: 0, custom: true }
           : null
-        return { mode: 'multi-values', items: customRow ? [customRow, ...filtered] : filtered }
+        return {
+          mode: 'multi-values',
+          items: customRow ? [customRow, ...filtered] : filtered,
+          status: src.status, error: src.error,
+        }
       }
-      if (needsTypedValue) return { mode: 'typed-value' }
-      const values = computeTopValues(composing.field)
-      const filtered = q ? values.filter(v => v.value.toLowerCase().includes(q)) : values
-      return { mode: 'values', items: filtered }
+      return { mode: 'values', items: filtered, status: src.status, error: src.error }
     }
 
     const rec = recents
@@ -518,7 +578,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
       freeTextFirst: fac.length === 0, canGroup: !typed,
       connectors: conns, connectorsFirst: CONNECTORS.includes(typed),
     }
-  }, [text, phase, composing, needsTypedValue, recents, savedQueries, chips.length, insertionPath])
+  }, [text, phase, composing, needsTypedValue, recents, savedQueries, chips.length, insertionPath, valueSource])
 
   const flatItems = useMemo(() => {
     if (suggestions.mode === 'fields') {
@@ -542,10 +602,14 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     if (suggestions.mode === 'operators') {
       return suggestions.items.map((o, i) => ({ kind: 'operator', payload: o, key: `o${i}` }))
     }
+    // Only a settled list is navigable — skeleton and error rows are not
+    // targets, so Enter while loading can never commit a placeholder.
     if (suggestions.mode === 'values') {
+      if (suggestions.status !== 'ready') return []
       return suggestions.items.map((v, i) => ({ kind: 'value', payload: v, key: `v${i}` }))
     }
     if (suggestions.mode === 'multi-values') {
+      if (suggestions.status !== 'ready') return []
       return suggestions.items.map((v, i) => ({ kind: 'multi-value', payload: v, key: `m${i}` }))
     }
     return []
@@ -1610,9 +1674,16 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
             {suggestions.mode === 'values' && (
               <Section
                 label={`Values for ${composing.field}`}
-                meta={`${suggestions.items.length} value${suggestions.items.length === 1 ? '' : 's'}`}
+                meta={valueSectionMeta(suggestions)}
               >
-                {suggestions.items.length === 0 ? (
+                {suggestions.status === 'loading' ? <LoadingRows /> :
+                 suggestions.status === 'error' ? <ErrorRow message={suggestions.error} onRetry={retryValues} /> :
+                 suggestions.status === 'empty' ? (
+                  <Empty>
+                    No values recorded for <span className="mono">{composing.field}</span> in this time range.
+                    Type one and press <kbd>Enter</kbd> to use it anyway.
+                  </Empty>
+                ) : suggestions.items.length === 0 ? (
                   <Empty>No values match "{text}". Press <kbd>Enter</kbd> to use it as an exact value.</Empty>
                 ) : suggestions.items.map((v, i) => {
                   const idx = flatItems.findIndex(x => x.key === `v${i}`)
@@ -1628,9 +1699,15 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
             {suggestions.mode === 'multi-values' && (
               <Section
                 label={`Values for ${composing.field} ${composing.op === 'in' ? '(in)' : '(not in)'}`}
-                meta={`${pendingValues.length} selected`}
+                meta={suggestions.status === 'ready' ? `${pendingValues.length} selected` : valueSectionMeta(suggestions)}
               >
-                {suggestions.items.length === 0 ? (
+                {suggestions.status === 'loading' ? <LoadingRows /> :
+                 suggestions.status === 'error' ? <ErrorRow message={suggestions.error} onRetry={retryValues} /> :
+                 suggestions.status === 'empty' ? (
+                  <Empty>
+                    No values recorded for <span className="mono">{composing.field}</span> in this time range.
+                  </Empty>
+                ) : suggestions.items.length === 0 ? (
                   <Empty>No values match "{text}".</Empty>
                 ) : suggestions.items.map((v, i) => {
                   const idx = flatItems.findIndex(x => x.key === `m${i}`)
@@ -1707,6 +1784,15 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   )
 }
 
+// The section's meta slot doubles as the status line, so the header never
+// claims "0 values" for a list that simply hasn't arrived.
+function valueSectionMeta({ status, items }) {
+  if (status === 'loading') return 'Loading…'
+  if (status === 'error') return 'Unavailable'
+  if (status === 'empty') return 'None in range'
+  return `${items.length} value${items.length === 1 ? '' : 's'}`
+}
+
 function Section({ label, meta, children }) {
   return (
     <div className="qb-ov-section">
@@ -1721,6 +1807,35 @@ function Section({ label, meta, children }) {
 
 function Empty({ children }) {
   return <div className="qb-ov-empty">{children}</div>
+}
+
+// Placeholder rows sized like real ones, so the list doesn't resize when values
+// land. Not focusable and not in flatItems — there is nothing here to pick.
+function LoadingRows({ count = 5 }) {
+  return (
+    <div className="qb-ov-loading" aria-live="polite" aria-busy="true">
+      <span className="sr-only">Loading values…</span>
+      {Array.from({ length: count }, (_, i) => (
+        <div className="qb-ov-skel-row" key={i} aria-hidden="true">
+          <span className="qb-ov-skel" style={{ width: `${58 - i * 7}%` }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// A failed lookup is recoverable, so it offers the recovery rather than just
+// reporting the failure. Typing a value by hand still works underneath.
+function ErrorRow({ message, onRetry }) {
+  return (
+    <div className="qb-ov-error" role="alert">
+      <AlertCircle size={13} strokeWidth={2} />
+      <span className="qb-ov-error-msg">{message}</span>
+      <button type="button" className="qb-ov-retry" onMouseDown={(e) => { e.preventDefault(); onRetry?.() }}>
+        Retry
+      </button>
+    </div>
+  )
 }
 
 function Row({ icon, label, meta, active, onHover, onPick }) {
