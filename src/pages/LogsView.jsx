@@ -533,9 +533,13 @@ function LinkMarker({ hint }) {
 //
 // Anything not named here still renders, in a group of its own at the end — a
 // new tag should appear in the panel without a code change here.
+// The three fields that answer "what is this record about" — pulled to the top
+// as cards, above the message, because they are what you look for first and
+// what you carry to the next screen.
+const HIGHLIGHT_FIELDS = ['service', 'endpoint', 'trace_id']
+
 const FIELD_GROUPS = [
-  ['env', 'log.level', 'service', 'endpoint', 'trace_id'],
-  ['path', 'http.status', 'duration_ms'],
+  ['env', 'log.level', 'path', 'http.status', 'duration_ms'],
   ['log.exception.type', 'log.stacktrace'],
 ]
 
@@ -554,7 +558,7 @@ function isHiddenField(k, v) {
 
 function recordFieldGroups(log) {
   const tags = log.tags
-  const named = new Set(FIELD_GROUPS.flat())
+  const named = new Set([...FIELD_GROUPS.flat(), ...HIGHLIGHT_FIELDS])
   const groups = FIELD_GROUPS.map(keys => keys
     .filter(k => k in tags && !isHiddenField(k, tags[k]))
     .map(k => [k, tags[k]]))
@@ -570,17 +574,97 @@ function recordFieldGroups(log) {
 // So it gets its own bounded, scrollable box with the original whitespace kept,
 // and the first line separated from the frames: the exception message is what
 // you read, the frames are what you scan.
+// One field row, shared by the pinned block and the grouped list so a field
+// looks and behaves the same wherever it currently sits.
+function FieldRow({ name, value, hits, isMsg, pinned, pinnable, onTogglePin, onMenu }) {
+  const link = isMsg ? null : linkFor(name, value)
+  const isStack = name === 'log.stacktrace' && !!value
+  const block = isStack || isMsg
+  return (
+    <div className={`log-detail-field${block ? ' is-block' : ''}`}>
+      <span className="log-detail-key">{highlightTerms(name, hits)}</span>
+      {isStack ? (
+        <StackTrace text={String(value)} />
+      ) : isMsg ? (
+        <div className="log-detail-val is-msg mono">{highlightTerms(String(value ?? ''), hits)}</div>
+      ) : (
+        <span className={`log-detail-val mono${link ? ' is-link' : ''}`} data-log-field={name} data-log-value={value}>
+          {highlightTerms(String(value ?? ''), hits)}
+          {link && <LinkMarker hint={link.hint} />}
+        </span>
+      )}
+      <div className="log-field-actions">
+        <button
+          type="button"
+          className="log-field-menu-btn"
+          aria-label={`Actions for ${name}`}
+          title={`Actions for ${name}`}
+          onClick={(e) => { e.stopPropagation(); onMenu(name, value, e.currentTarget) }}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+        </button>
+        {pinnable && <PinButton name={name} pinned={pinned} onToggle={onTogglePin} />}
+      </div>
+    </div>
+  )
+}
+
+// Pinning is what someone does when they are reading the same field across many
+// records, so the button stays visible once set rather than hiding with the row.
+function PinButton({ name, pinned, onToggle }) {
+  return (
+    <button
+      type="button"
+      className={`log-field-pin-btn${pinned ? ' is-pinned' : ''}`}
+      aria-pressed={pinned}
+      aria-label={pinned ? `Unpin ${name}` : `Pin ${name} to the top`}
+      title={pinned ? `Unpin ${name}` : `Pin ${name} to the top`}
+      onClick={(e) => { e.stopPropagation(); onToggle(name) }}
+    >
+      <svg viewBox="0 0 24 24" fill={pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 17v5"/><path d="M9 10.76V4h6v6.76l2 2.24v2H7v-2z"/>
+      </svg>
+    </button>
+  )
+}
+
+// Collapsed height. Two frames is enough to see where the throw happened
+// without a trace taking over the panel.
+const COLLAPSED_FRAMES = 2
+
 // Returns two grid children rather than one box: the exception message belongs
 // on the label's line, where every other field puts its value, and only the
 // frames need the full width beneath.
 function StackTrace({ text }) {
+  const [expanded, setExpanded] = useState(false)
   const [head, ...frames] = String(text).split('\n')
+  const collapsible = frames.length > COLLAPSED_FRAMES
+  const shown = expanded || !collapsible ? frames : frames.slice(0, COLLAPSED_FRAMES)
+  const hidden = frames.length - shown.length
+
   return (
     <>
       <div className="log-stack-msg">{head}</div>
       {frames.length > 0 && (
         <div className="log-stack-frames">
-          {frames.map((line, i) => <div className="log-stack-frame" key={i}>{line}</div>)}
+          {/* The scroll lives on the inner list so the toggle stays put rather
+              than scrolling away with the frames it controls. */}
+          <div className={`log-stack-scroll${expanded ? ' is-expanded' : ''}`}>
+            {shown.map((line, i) => <div className="log-stack-frame" key={i}>{line}</div>)}
+          </div>
+          {collapsible && (
+            <button
+              type="button"
+              className="log-stack-toggle"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(v => !v)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d={expanded ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'} />
+              </svg>
+              {expanded ? 'Show less' : `${hidden} more frame${hidden === 1 ? '' : 's'}`}
+            </button>
+          )}
         </div>
       )}
     </>
@@ -653,6 +737,7 @@ function LogRecordDrawer({
   record, onClose, searchTerms,
   onAddChip, onDistribution, onCopy,
   index = 0, total = 0, onNavigate,
+  pinned = [], onTogglePin,
 }) {
   const [view, setView] = useState('fields')
   const [menu, setMenu] = useState(null)   // { field, value, x, y }
@@ -668,16 +753,36 @@ function LogRecordDrawer({
   const matches = (k, v) =>
     !q || k.toLowerCase().includes(q) || String(v ?? '').toLowerCase().includes(q)
 
-  const groups = useMemo(() => {
-    const all = recordFieldGroups(record)
-    if (!q) return all
-    return all
-      .map(g => g.filter(([k, v]) => matches(k, v)))
-      .filter(g => g.length > 0)
-  }, [record, q])   // eslint-disable-line react-hooks/exhaustive-deps
+  const groups = useMemo(() => recordFieldGroups(record)
+    .map(g => g.filter(([k, v]) => !pinned.includes(k) && matches(k, v)))
+    .filter(g => g.length > 0),
+  [record, q, pinned])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const msgMatches = matches('_msg', record.message)
-  const matchCount = groups.reduce((n, g) => n + g.length, 0) + (msgMatches ? 1 : 0)
+  const valueOf = (k) => (k === '_msg' ? record.message : record.tags[k])
+  // The stack trace and its exception type are the two fields that cannot be
+  // pinned: one is a block, and neither exists on most records, so pinning them
+  // would leave a gap at the top of every non-error log.
+  const canPin = (k) => !ERROR_ONLY_FIELDS.has(k) && !HIGHLIGHT_FIELDS.includes(k)
+
+  // Pin order is insertion order, so the newest pin lands at the bottom of the
+  // block and the ones above it never move.
+  const pinnedRows = pinned
+    .filter(k => (k === '_msg' || k in record.tags) && matches(k, valueOf(k)))
+    .map(k => [k, valueOf(k)])
+
+  const isPinned = (k) => pinned.includes(k)
+  // A card with no value is a box saying nothing, so it is dropped and the row
+  // reflows to however many are left — three, two, or one.
+  const highlights = HIGHLIGHT_FIELDS
+    .filter(k => {
+      const v = record.tags[k]
+      return v != null && v !== '' && matches(k, v)
+    })
+    .map(k => [k, record.tags[k]])
+
+  const msgMatches = !isPinned('_msg') && matches('_msg', record.message)
+  const matchCount = groups.reduce((n, g) => n + g.length, 0)
+    + pinnedRows.length + highlights.length + (msgMatches ? 1 : 0)
 
   const json = useMemo(() => toRecord(record), [record])
 
@@ -784,43 +889,74 @@ function LogRecordDrawer({
               No field or value matches <span className="mono">{fieldQuery.trim()}</span>
             </div>
           )}
+          {highlights.length > 0 && (
+            <div
+              className="log-detail-highlights"
+              style={{ gridTemplateColumns: `repeat(${highlights.length}, minmax(0, 1fr))` }}
+            >
+              {highlights.map(([k, v]) => {
+                const link = linkFor(k, v)
+                return (
+                  <div className="log-hl-card" key={k}>
+                    <div className="log-hl-head">
+                      <span className="log-hl-key">{highlightTerms(k, hits)}</span>
+                      <button
+                          type="button"
+                          className="log-field-menu-btn"
+                          aria-label={`Actions for ${k}`}
+                          title={`Actions for ${k}`}
+                          onClick={(e) => { e.stopPropagation(); openMenu(k, v, e.currentTarget) }}
+                        >
+                          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+                        </button>
+                    </div>
+                    <div className="log-hl-value-row">
+                      <span
+                        className={`log-hl-value mono${link ? ' is-link' : ''}`}
+                        title={String(v)}
+                        data-log-field={k}
+                        data-log-value={v}
+                      >{highlightTerms(String(v), hits)}</span>
+                      {link && <LinkMarker hint={link.hint} />}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {pinnedRows.length > 0 && (
+            <div className="log-detail-pinned">
+              {pinnedRows.map(([k, v]) => (
+                <FieldRow
+                  key={k} name={k} value={v} hits={hits}
+                  isMsg={k === '_msg'}
+                  pinned pinnable
+                  onTogglePin={onTogglePin} onMenu={openMenu}
+                />
+              ))}
+            </div>
+          )}
+
           {msgMatches && (
-          <div className="log-detail-msg">
-            <div className="log-detail-key">{highlightTerms('_msg', hits)}</div>
-            <div className="log-detail-val is-msg mono">{highlightTerms(record.message, q ? hits : searchTerms)}</div>
-          </div>
+            <div className="log-detail-group">
+              <FieldRow
+                name="_msg" value={record.message} hits={q ? hits : searchTerms}
+                isMsg pinned={false} pinnable
+                onTogglePin={onTogglePin} onMenu={openMenu}
+              />
+            </div>
           )}
           {groups.map((group, gi) => (
-          <div className="log-detail-group" key={gi}>
-          {group.map(([k, v]) => {
-            const link = linkFor(k, v)
-            // A stack trace is too wide to live in the value column. It drops
-            // below its label and takes the full width instead.
-            const isBlock = k === 'log.stacktrace' && !!v
-            return (
-            <div key={k} className={`log-detail-field${isBlock ? ' is-block' : ''}`}>
-              <span className="log-detail-key">{highlightTerms(k, hits)}</span>
-              {k === 'log.stacktrace' && v ? (
-                <StackTrace text={String(v)} />
-              ) : (
-                <span className={`log-detail-val mono${link ? ' is-link' : ''}`} data-log-field={k} data-log-value={v}>
-                  {highlightTerms(String(v ?? ''), hits)}
-                  {link && <LinkMarker hint={link.hint} />}
-                </span>
-              )}
-              <button
-                type="button"
-                className="log-field-menu-btn"
-                aria-label={`Actions for ${k}`}
-                title={`Actions for ${k}`}
-                onClick={(e) => { e.stopPropagation(); openMenu(k, v, e.currentTarget) }}
-              >
-                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
-              </button>
+            <div className="log-detail-group" key={gi}>
+              {group.map(([k, v]) => (
+                <FieldRow
+                  key={k} name={k} value={v} hits={hits}
+                  pinned={false} pinnable={canPin(k)}
+                  onTogglePin={onTogglePin} onMenu={openMenu}
+                />
+              ))}
             </div>
-            )
-          })}
-          </div>
           ))}
         </div>
       ) : (
@@ -1288,6 +1424,15 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
 
   // Shared by every copy action in the record drawer, so all of them report
   // through the same toast the query bar already uses.
+  // Pins live here rather than in the drawer so they survive closing it, not
+  // just stepping between records — a field you chose to watch stays watched.
+  const [pinnedFields, setPinnedFields] = useState([])
+  const togglePinnedField = useCallback((field) => {
+    setPinnedFields(prev => prev.includes(field)
+      ? prev.filter(f => f !== field)
+      : [...prev, field])
+  }, [])
+
   const copyText = useCallback((text, message) => {
     try { navigator.clipboard.writeText(text)?.catch(() => {}) } catch (_) {}
     setToast?.(message)
@@ -2005,6 +2150,8 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
           index={selectedIndex}
           total={filtered.length}
           onNavigate={(i) => { const row = filtered[i]; if (row) setSelectedId(row.id) }}
+          pinned={pinnedFields}
+          onTogglePin={togglePinnedField}
         />
       )}
       </div>
