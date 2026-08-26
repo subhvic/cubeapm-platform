@@ -656,8 +656,28 @@ function LogRecordDrawer({
 }) {
   const [view, setView] = useState('fields')
   const [menu, setMenu] = useState(null)   // { field, value, x, y }
+  const [fieldQuery, setFieldQuery] = useState('')
   const hasPrev = index > 0
   const hasNext = index >= 0 && index < total - 1
+
+  // Matches a field on either half of the pair. Someone looking for "payment"
+  // is as likely to be hunting the value as the field holding it, and which one
+  // it turns out to be is exactly what they are trying to find out.
+  const q = fieldQuery.trim().toLowerCase()
+  const hits = q ? [fieldQuery.trim()] : []
+  const matches = (k, v) =>
+    !q || k.toLowerCase().includes(q) || String(v ?? '').toLowerCase().includes(q)
+
+  const groups = useMemo(() => {
+    const all = recordFieldGroups(record)
+    if (!q) return all
+    return all
+      .map(g => g.filter(([k, v]) => matches(k, v)))
+      .filter(g => g.length > 0)
+  }, [record, q])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const msgMatches = matches('_msg', record.message)
+  const matchCount = groups.reduce((n, g) => n + g.length, 0) + (msgMatches ? 1 : 0)
 
   const json = useMemo(() => toRecord(record), [record])
 
@@ -735,13 +755,42 @@ function LogRecordDrawer({
         )}
       </div>
 
+      {/* Overview only. Filtering the JSON view would hand back something that
+          reads as the record but no longer parses as one. */}
+      {view === 'fields' && (
+        <div className="log-detail-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input
+            value={fieldQuery}
+            onChange={(e) => setFieldQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape' && fieldQuery) { e.stopPropagation(); setFieldQuery('') } }}
+            placeholder="Search fields and values…"
+            spellCheck={false}
+            autoComplete="off"
+            aria-label="Search fields and values"
+          />
+          {fieldQuery && (
+            <button type="button" onClick={() => setFieldQuery('')} aria-label="Clear search" title="Clear search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          )}
+        </div>
+      )}
+
       {view === 'fields' ? (
         <div className="log-detail-body" data-log-content>
+          {matchCount === 0 && (
+            <div className="log-detail-nomatch">
+              No field or value matches <span className="mono">{fieldQuery.trim()}</span>
+            </div>
+          )}
+          {msgMatches && (
           <div className="log-detail-msg">
-            <div className="log-detail-key">_msg</div>
-            <div className="log-detail-val is-msg mono">{highlightTerms(record.message, searchTerms)}</div>
+            <div className="log-detail-key">{highlightTerms('_msg', hits)}</div>
+            <div className="log-detail-val is-msg mono">{highlightTerms(record.message, q ? hits : searchTerms)}</div>
           </div>
-          {recordFieldGroups(record).map((group, gi) => (
+          )}
+          {groups.map((group, gi) => (
           <div className="log-detail-group" key={gi}>
           {group.map(([k, v]) => {
             const link = linkFor(k, v)
@@ -750,12 +799,12 @@ function LogRecordDrawer({
             const isBlock = k === 'log.stacktrace' && !!v
             return (
             <div key={k} className={`log-detail-field${isBlock ? ' is-block' : ''}`}>
-              <span className="log-detail-key">{k}</span>
+              <span className="log-detail-key">{highlightTerms(k, hits)}</span>
               {k === 'log.stacktrace' && v ? (
                 <StackTrace text={String(v)} />
               ) : (
                 <span className={`log-detail-val mono${link ? ' is-link' : ''}`} data-log-field={k} data-log-value={v}>
-                  {v}
+                  {highlightTerms(String(v ?? ''), hits)}
                   {link && <LinkMarker hint={link.hint} />}
                 </span>
               )}

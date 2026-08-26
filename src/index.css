@@ -1920,6 +1920,37 @@ tbody tr:hover { background: var(--panel-2); }
 .log-json-line:hover .log-link-hint { opacity: 1; }
 .log-json-line .log-link-hint { margin-left: 6px; color: var(--brand-on-muted); }
 
+/* ── Field search ── */
+.log-detail-search {
+  display: flex; align-items: center; gap: 7px;
+  margin: 8px 14px 4px; padding: 5px 8px;
+  background: var(--panel); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  transition: border-color .12s;
+}
+.log-detail-search:focus-within { border-color: var(--brand); }
+.log-detail-search > svg { width: 13px; height: 13px; color: var(--text-muted); flex-shrink: 0; }
+.log-detail-search input {
+  flex: 1; min-width: 0;
+  background: none; border: none; outline: none; padding: 0;
+  font-family: 'Rubik', sans-serif; font-size: 12px;
+  color: var(--text-primary);
+}
+.log-detail-search input::placeholder { color: var(--text-muted); }
+.log-detail-search button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; flex-shrink: 0;
+  background: none; border: none; border-radius: 3px; cursor: pointer;
+  color: var(--text-muted);
+}
+.log-detail-search button:hover { color: var(--text-primary); background: var(--panel-2); }
+.log-detail-search button svg { width: 12px; height: 12px; }
+
+.log-detail-nomatch {
+  padding: 18px 16px; text-align: center;
+  font-size: 12px; color: var(--text-muted); line-height: 1.5;
+}
+
 /* Field groups, divided the same way _msg is — a rule and a little air, no
    headings. The grouping is legible from the spacing; naming each block would
    add three labels to read before reaching the values they describe. */
