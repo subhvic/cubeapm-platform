@@ -1054,7 +1054,7 @@ tbody tr:hover { background: var(--panel-2); }
 .facet-opt-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
 .facet-opt-count { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
 
-.logs-main { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-lg); display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
+.logs-main { position: relative; background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-lg); display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
 .logs-main-body { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .logs-query-bar { display: flex; align-items: stretch; gap: 10px; padding: 10px 12px 10px 14px; }
 .logs-query-bar .hbtn { align-self: stretch; padding-top: 0; padding-bottom: 0; }
@@ -1819,20 +1819,199 @@ tbody tr:hover { background: var(--panel-2); }
 .log-tag .k { color: var(--text-muted); }
 .log-tag .v { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.log-detail { width: 414px; flex-shrink: 0; border-left: 1px solid var(--border-subtle); background: var(--card); display: flex; flex-direction: column; overflow: hidden; }
-.log-detail-head { padding: 12px 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); }
-.log-detail-title { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
-.log-detail-sub { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+/* Overlays the results rather than sitting beside them: opening a record used
+   to shrink the table and reflow the chart and query bar, so the page moved
+   under you at the moment you were trying to read one row of it. Absolute
+   inside .logs-main, which is the clipping boundary. */
+.log-detail {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 20;
+  width: 560px; max-width: 68%;
+  border-left: 1px solid var(--border-panel);
+  background: var(--card);
+  box-shadow: var(--shadow-drawer);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.log-detail-head { padding: 12px 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.log-detail-heading { min-width: 0; }
+.log-detail-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+/* Navigation sits with the close button: both act on the panel itself rather
+   than on the record's contents, so they read as one group. */
+.log-detail-head-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.log-detail-nav { display: flex; align-items: center; gap: 1px; }
+.log-detail-nav button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; border-radius: 4px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); transition: color .12s, background-color .12s;
+}
+.log-detail-nav button:hover:not(:disabled) { color: var(--text-primary); background: var(--panel-2); }
+.log-detail-nav button:disabled { opacity: .3; cursor: default; }
+.log-detail-nav button svg { width: 15px; height: 15px; }
+.log-detail-pos {
+  font-size: 12px; color: var(--text-secondary); padding: 0 5px; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.log-detail-pos .cur { color: var(--brand-on-muted); font-weight: 500; }
+.log-detail-sub { font-size: 11.5px; color: var(--text-secondary); margin-top: 5px; }
 .log-detail-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; }
 .log-detail-close:hover { color: var(--text-primary); background: var(--panel-2); }
 .log-detail-close svg { width: 14px; height: 14px; }
 .log-detail-body { flex: 1; overflow-y: auto; padding: 4px 0 10px; }
 .log-detail-msg { padding: 10px 14px 12px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 4px; }
 .log-detail-key { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
-.log-detail-val { font-size: 11px; color: var(--text-primary); line-height: 1.5; word-break: break-all; }
-.log-detail-field { display: grid; grid-template-columns: 128px 1fr; gap: 10px; padding: 5px 14px; align-items: baseline; font-size: 10.5px; }
-.log-detail-field .log-detail-key { margin-bottom: 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
-.log-detail-field .log-detail-val { font-size: 10.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-detail-val { font-size: 12px; color: var(--text-primary); line-height: 1.5; word-break: break-word; }
+.log-detail-msg .log-detail-val.is-msg { font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.log-detail-field { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding: 7px 16px; align-items: start; font-size: 11px; }
+.log-detail-field .log-detail-key { margin-bottom: 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding-top: 1px; }
+/* The values are the record. They were dimmer and smaller than the labels
+   naming them, and truncated on top of that — a trace id or a stack trace was
+   unreadable without opening the JSON view. */
+.log-detail-field .log-detail-val {
+  font-size: 12px; color: var(--text-primary); line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+}
+
+/* ── Record drawer: Fields / JSON toggle ── */
+.log-detail-tabs {
+  display: flex; align-items: center; gap: 2px;
+  padding: 8px 14px 6px; border-bottom: 1px solid var(--border-subtle);
+}
+.log-detail-tab {
+  background: none; border: none; cursor: pointer;
+  padding: 3px 9px; border-radius: 4px;
+  font-family: 'Rubik', sans-serif; font-size: 11.5px; font-weight: 500;
+  color: var(--text-muted); transition: color .12s, background-color .12s;
+}
+.log-detail-tab:hover { color: var(--text-secondary); background: var(--panel-2); }
+.log-detail-tab.active { color: var(--text-primary); background: var(--panel-2); }
+.log-detail-copyjson {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: 1px solid var(--border-subtle); border-radius: 4px;
+  padding: 3px 8px; cursor: pointer;
+  font-family: 'Rubik', sans-serif; font-size: 11px; color: var(--text-secondary);
+  transition: color .12s, border-color .12s, background-color .12s;
+}
+.log-detail-copyjson:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--panel-2); }
+.log-detail-copyjson svg { width: 12px; height: 12px; }
+
+/* ── Per-field action trigger ── */
+/* Reserved by the grid rather than revealed by display:none, so rows do not
+   reflow on hover and the button stays reachable by keyboard. */
+.log-detail-field { grid-template-columns: 140px 1fr 20px; }
+
+/* ── Pending-link affordance ── */
+/* The value carries brand colour and a dotted underline; the arrow sits
+   immediately after the text so the two read as one object. Dotted rather than
+   solid on purpose — it marks the value as leading somewhere without borrowing
+   the exact styling of links that navigate today. */
+.log-detail-val.is-link {
+  color: var(--brand-on-muted);
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.log-link-hint {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  margin-left: 4px; vertical-align: -1px;
+  color: currentColor; opacity: .8;
+  transition: opacity .12s;
+}
+.log-detail-field:hover .log-link-hint,
+.log-json-line:hover .log-link-hint { opacity: 1; }
+.log-json-line .log-link-hint { margin-left: 6px; color: var(--brand-on-muted); }
+
+/* Field groups, divided the same way _msg is — a rule and a little air, no
+   headings. The grouping is legible from the spacing; naming each block would
+   add three labels to read before reaching the values they describe. */
+.log-detail-group { padding: 5px 0; border-bottom: 1px solid var(--border-subtle); }
+.log-detail-group:last-child { border-bottom: none; }
+
+/* A field whose value is a block rather than a line: the label keeps row one
+   with the actions button, and the value spans the full width beneath it. */
+/* Row one is an ordinary field row — label, value, actions. Only the block
+   itself drops beneath and takes the full width. */
+.log-detail-field.is-block { row-gap: 8px; }
+.log-detail-field.is-block .log-detail-key { grid-column: 1; grid-row: 1; }
+.log-detail-field.is-block .log-stack-msg { grid-column: 2; grid-row: 1; }
+.log-detail-field.is-block .log-field-menu-btn { grid-column: 3; grid-row: 1; }
+.log-detail-field.is-block .log-stack-frames { grid-column: 1 / -1; grid-row: 2; }
+
+/* ── Stack trace ── */
+/* The exception message is the field's value and sits on the label's line. */
+.log-stack-msg {
+  font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5;
+  color: var(--critical-fg);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+/* The frames are the document: bounded so one field cannot own the panel,
+   scrollable so nothing is lost, indentation kept so call order stays readable. */
+.log-stack-frames {
+  max-height: 168px; overflow: auto;
+  padding: 6px 0;
+  background: var(--panel); border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+}
+/* `pre` keeps the leading tab that shows call depth; the row scrolls sideways
+   rather than wrapping, so frames stay one-per-line and scannable. */
+.log-stack-frame {
+  padding: 1px 10px;
+  color: var(--text-secondary); line-height: 1.6;
+  white-space: pre; tab-size: 2;
+}
+.log-stack-frame:hover { background: var(--panel-2); color: var(--text-primary); }
+
+.log-sel-item.is-pending {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px; border-radius: 4px;
+  font-family: 'Rubik', sans-serif; font-size: 12px;
+  color: var(--text-muted); cursor: default; white-space: nowrap;
+}
+.log-sel-item.is-pending:hover { background: none; color: var(--text-muted); }
+.log-sel-item.is-pending svg { flex-shrink: 0; }
+.log-field-menu-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--text-muted); opacity: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 18px; border-radius: 3px;
+  transition: opacity .12s, color .12s, background-color .12s;
+}
+.log-detail-field:hover .log-field-menu-btn,
+.log-field-menu-btn:focus-visible { opacity: 1; }
+.log-field-menu-btn:hover { color: var(--text-primary); background: var(--panel-2); }
+.log-field-menu-btn svg { width: 13px; height: 13px; }
+
+.log-field-menu { max-height: 320px; overflow-y: auto; }
+.log-sel-sep { height: 1px; background: var(--border-subtle); margin: 3px 6px; }
+.log-sel-note {
+  padding: 6px 10px 7px; font-size: 10.5px; line-height: 1.45;
+  color: var(--text-muted); white-space: normal;
+}
+
+/* ── JSON view ── */
+.log-json-body { padding: 10px 0 14px; }
+.log-json {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px; line-height: 1.65;
+  color: var(--text-secondary);
+}
+.log-json-line { padding: 0 14px; }
+.log-json-punc { color: var(--text-muted); }
+.log-json-key {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-family: inherit; font-size: inherit;
+  color: var(--brand-on-muted);
+  border-bottom: 1px dotted transparent;
+}
+.log-json-key:hover { border-bottom-color: currentColor; }
+/* Long values (a stacktrace is one escaped string) wrap instead of clipping.
+   The escaping is kept so what is shown matches what Copy JSON writes. */
+.log-json-val {
+  color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-word;
+}
+.log-json-val.num { color: var(--info); }
 
 /* ============ Log text-selection menu + distribution popover ============ */
 .log-text, .log-detail-val, [data-log-field] { cursor: text; }

@@ -14,7 +14,7 @@ import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight } from 'lucide-react'
 
 const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
 const AGG_NUMERIC_FIELDS = new Set(FIELD_CATALOG.filter(f => f.type === 'keyword').map(f => f.field))
@@ -154,8 +154,13 @@ function FacetGroup({ title, options, selected, onToggle, toggleVariant = 'chip'
   )
 }
 
+// Every tag a record carries can be turned into a column, so the Fields
+// dropdown lists all of them rather than an arbitrary subset.
 const EXTRA_FIELDS = [
+  { key: 'duration_ms', label: 'duration_ms' },
   { key: 'endpoint', label: 'endpoint' },
+  { key: 'env', label: 'env' },
+  { key: 'http.status', label: 'http.status' },
   { key: 'log.exception.type', label: 'log.exception.type' },
   { key: 'log.level', label: 'log.level' },
   { key: 'log.stacktrace', label: 'log.stacktrace' },
@@ -485,6 +490,370 @@ function AlertDrawer({ filters, query, onClose }) {
         </div>
       </aside>
     </div>
+  )
+}
+
+// Fields that lead somewhere else in the product. The destination is described
+// here rather than at each render site, so the marker beside the value and the
+// entry in the field menu can never name different places. Wiring navigation
+// later means giving each entry an href — nothing about the signifier changes.
+//
+// Deliberately inert for now: a marker that reads as a live link and does
+// nothing is worse than no marker at all.
+const FIELD_LINKS = {
+  service: {
+    label: (v) => `Open ${v} in APM`,
+    hint: (v) => `Opens the ${v} service page in APM — not connected yet`,
+  },
+  trace_id: {
+    label: () => 'Open this trace',
+    hint: (v) => `Opens trace ${String(v).slice(0, 8)}… in Traces — not connected yet`,
+  },
+}
+
+function linkFor(field, value) {
+  const link = FIELD_LINKS[field]
+  if (!link || value == null || value === '') return null
+  return { label: link.label(value), hint: link.hint(value) }
+}
+
+// Marks a value as a doorway. Not a button: there is nothing to press yet, and
+// a control that swallows clicks teaches people the feature is broken.
+function LinkMarker({ hint }) {
+  return (
+    <span className="log-link-hint" role="img" aria-label={hint} title={hint}>
+      <ArrowUpRight size={11} strokeWidth={2.25} />
+    </span>
+  )
+}
+
+// How the Overview lays the record out: where it came from, what the request
+// did, and how it failed. Grouping beats one long list because the questions
+// you bring to a log are asked of one group at a time.
+//
+// Anything not named here still renders, in a group of its own at the end — a
+// new tag should appear in the panel without a code change here.
+const FIELD_GROUPS = [
+  ['env', 'log.level', 'service', 'endpoint', 'trace_id'],
+  ['path', 'http.status', 'duration_ms'],
+  ['log.exception.type', 'log.stacktrace'],
+]
+
+// These exist only on error records. Elsewhere the rows are labels for things
+// that are not there, which reads as missing data rather than as "this log did
+// not throw" — and since they are a whole group, an info record would otherwise
+// end with a heading-shaped gap. With both empty the group drops out entirely.
+//
+// The JSON view deliberately keeps them: that view is the raw record, this one
+// is what the record actually has.
+const ERROR_ONLY_FIELDS = new Set(['log.exception.type', 'log.stacktrace'])
+
+function isHiddenField(k, v) {
+  return ERROR_ONLY_FIELDS.has(k) && (v == null || v === '')
+}
+
+function recordFieldGroups(log) {
+  const tags = log.tags
+  const named = new Set(FIELD_GROUPS.flat())
+  const groups = FIELD_GROUPS.map(keys => keys
+    .filter(k => k in tags && !isHiddenField(k, tags[k]))
+    .map(k => [k, tags[k]]))
+  const rest = Object.entries(tags).filter(([k, v]) => !named.has(k) && !isHiddenField(k, v))
+  if (rest.length) groups.push(rest)
+  return groups.filter(g => g.length > 0)
+}
+
+// A stack trace is the one field that is a document rather than a value. Left
+// as flowing text it either gets truncated to uselessness or runs for half the
+// panel, and its indentation — the thing that makes a trace scannable — is lost.
+//
+// So it gets its own bounded, scrollable box with the original whitespace kept,
+// and the first line separated from the frames: the exception message is what
+// you read, the frames are what you scan.
+// Returns two grid children rather than one box: the exception message belongs
+// on the label's line, where every other field puts its value, and only the
+// frames need the full width beneath.
+function StackTrace({ text }) {
+  const [head, ...frames] = String(text).split('\n')
+  return (
+    <>
+      <div className="log-stack-msg">{head}</div>
+      {frames.length > 0 && (
+        <div className="log-stack-frames">
+          {frames.map((line, i) => <div className="log-stack-frame" key={i}>{line}</div>)}
+        </div>
+      )}
+    </>
+  )
+}
+
+// The record as one object — what the JSON view renders and Copy JSON writes.
+// Mirrors what the Fields view lists: timestamp and message alongside the tags.
+//
+// Undefined values are normalised to empty strings. A tag can be undefined when
+// the source has no value for it, and JSON.stringify drops those keys entirely —
+// so without this, Copy JSON would quietly hand over a record missing fields the
+// Fields view had just listed.
+function toRecord(log) {
+  const out = {
+    _time: `${log.dateStr}T${log.timeStr}Z`,
+    _msg: log.message,
+  }
+  for (const [k, v] of Object.entries(log.tags)) out[k] = v ?? ''
+  return out
+}
+
+// One JSON line. Recurses on objects so a nested payload renders correctly if
+// the data ever grows one — today every record is flat.
+function JsonRow({ path, name, value, depth, last, onKeyMenu }) {
+  const pad = { paddingLeft: `${depth * 14}px` }
+  const key = (
+    <button
+      type="button"
+      className="log-json-key"
+      onClick={(e) => { e.stopPropagation(); onKeyMenu(path, value, e.currentTarget) }}
+      title={`Actions for ${path}`}
+    >"{name}"</button>
+  )
+
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const entries = Object.entries(value)
+    return (
+      <>
+        <div className="log-json-line" style={pad}>{key}<span className="log-json-punc">: {'{'}</span></div>
+        {entries.map(([k, v], i) => (
+          <JsonRow key={k} path={`${path}.${k}`} name={k} value={v} depth={depth + 1}
+            last={i === entries.length - 1} onKeyMenu={onKeyMenu} />
+        ))}
+        <div className="log-json-line" style={pad}><span className="log-json-punc">{'}'}{last ? '' : ','}</span></div>
+      </>
+    )
+  }
+
+  const isNum = typeof value === 'number'
+  const link = linkFor(name, value)
+  return (
+    <div className="log-json-line" style={pad}>
+      {key}
+      <span className="log-json-punc">: </span>
+      <span className={`log-json-val${isNum ? ' num' : ''}`}>
+        {isNum ? String(value) : JSON.stringify(value ?? '')}
+      </span>
+      <span className="log-json-punc">{last ? '' : ','}</span>
+      {link && <LinkMarker hint={link.hint} />}
+    </div>
+  )
+}
+
+// Every action here already existed somewhere — Include/Exclude in the
+// text-selection menu, columns in the Fields dropdown, grouping in the pipe
+// toolbar. What was missing was reaching any of them from the field you are
+// looking at, instead of memorising its name and retyping it in the bar.
+function LogRecordDrawer({
+  record, onClose, searchTerms,
+  onAddChip, onDistribution, onCopy,
+  index = 0, total = 0, onNavigate,
+}) {
+  const [view, setView] = useState('fields')
+  const [menu, setMenu] = useState(null)   // { field, value, x, y }
+  const hasPrev = index > 0
+  const hasNext = index >= 0 && index < total - 1
+
+  const json = useMemo(() => toRecord(record), [record])
+
+  // A menu belongs to the row it was opened from; switching record or view
+  // leaves it pointing at something no longer on screen.
+  useEffect(() => { setMenu(null) }, [record, view])
+
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close() } }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey, true)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [menu])
+
+  const openMenu = (field, value, anchor) => {
+    const r = anchor.getBoundingClientRect()
+    setMenu({ field, value: value == null ? '' : String(value), x: r.right, y: r.bottom + 4 })
+  }
+
+  const run = (fn) => { fn(); setMenu(null) }
+
+  return (
+    <aside className="log-detail">
+      <div className="log-detail-head">
+        <div className="log-detail-heading">
+          <span className="log-detail-title">Record</span>
+          <div className="log-detail-sub mono">{record.dateStr}T{record.timeStr}Z</div>
+        </div>
+        <div className="log-detail-head-right">
+          {total > 1 && (
+              <nav className="log-detail-nav" aria-label="Record navigation">
+                <button onClick={() => onNavigate(0)} disabled={!hasPrev} title="First record" aria-label="First record">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 18L10 12l8-6"/><path d="M6 5v14"/></svg>
+                </button>
+                <button onClick={() => onNavigate(index - 1)} disabled={!hasPrev} title="Previous record" aria-label="Previous record">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+                <span className="log-detail-pos">
+                  <span className="mono cur">{index + 1}</span> of <span className="mono">{total.toLocaleString()}</span>
+                </span>
+                <button onClick={() => onNavigate(index + 1)} disabled={!hasNext} title="Next record" aria-label="Next record">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+                <button onClick={() => onNavigate(total - 1)} disabled={!hasNext} title="Last record" aria-label="Last record">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 18l8-6-8-6"/><path d="M18 5v14"/></svg>
+                </button>
+              </nav>
+          )}
+          <button className="log-detail-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div className="log-detail-tabs" role="tablist">
+        <button role="tab" aria-selected={view === 'fields'}
+          className={`log-detail-tab${view === 'fields' ? ' active' : ''}`}
+          onClick={() => setView('fields')}>Overview</button>
+        <button role="tab" aria-selected={view === 'json'}
+          className={`log-detail-tab${view === 'json' ? ' active' : ''}`}
+          onClick={() => setView('json')}>JSON</button>
+        {view === 'json' && (
+          <button className="log-detail-copyjson"
+            onClick={() => onCopy(JSON.stringify(json, null, 2), 'Record copied to clipboard as JSON')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copy JSON
+          </button>
+        )}
+      </div>
+
+      {view === 'fields' ? (
+        <div className="log-detail-body" data-log-content>
+          <div className="log-detail-msg">
+            <div className="log-detail-key">_msg</div>
+            <div className="log-detail-val is-msg mono">{highlightTerms(record.message, searchTerms)}</div>
+          </div>
+          {recordFieldGroups(record).map((group, gi) => (
+          <div className="log-detail-group" key={gi}>
+          {group.map(([k, v]) => {
+            const link = linkFor(k, v)
+            // A stack trace is too wide to live in the value column. It drops
+            // below its label and takes the full width instead.
+            const isBlock = k === 'log.stacktrace' && !!v
+            return (
+            <div key={k} className={`log-detail-field${isBlock ? ' is-block' : ''}`}>
+              <span className="log-detail-key">{k}</span>
+              {k === 'log.stacktrace' && v ? (
+                <StackTrace text={String(v)} />
+              ) : (
+                <span className={`log-detail-val mono${link ? ' is-link' : ''}`} data-log-field={k} data-log-value={v}>
+                  {v}
+                  {link && <LinkMarker hint={link.hint} />}
+                </span>
+              )}
+              <button
+                type="button"
+                className="log-field-menu-btn"
+                aria-label={`Actions for ${k}`}
+                title={`Actions for ${k}`}
+                onClick={(e) => { e.stopPropagation(); openMenu(k, v, e.currentTarget) }}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+              </button>
+            </div>
+            )
+          })}
+          </div>
+          ))}
+        </div>
+      ) : (
+        <div className="log-detail-body log-json-body">
+          <div className="log-json">
+            <div className="log-json-line"><span className="log-json-punc">{'{'}</span></div>
+            {Object.entries(json).map(([k, v], i, arr) => (
+              <JsonRow key={k} path={k} name={k} value={v} depth={1}
+                last={i === arr.length - 1} onKeyMenu={openMenu} />
+            ))}
+            <div className="log-json-line"><span className="log-json-punc">{'}'}</span></div>
+          </div>
+        </div>
+      )}
+
+      {menu && (() => {
+        const isMsg = menu.field === '_msg' || menu.field === '_time'
+        const hasValue = menu.value !== ''
+        const width = 208
+        const left = Math.max(8, Math.min(menu.x - width, window.innerWidth - width - 8))
+        const top = Math.min(menu.y, window.innerHeight - 300)
+        return (
+          <div className="log-sel-menu log-field-menu" style={{ left, top, width }}
+            onMouseDown={(e) => e.stopPropagation()}>
+            {/* Names the destination in words, so the marker beside the value
+                does not have to be decoded from an arrow alone. Rendered as a
+                div rather than a button: nothing happens on press yet, and it
+                should not take focus pretending otherwise. */}
+            {(() => {
+              const link = linkFor(menu.field, menu.value)
+              if (!link) return null
+              return (
+                <>
+                  <div className="log-sel-item is-pending" aria-disabled="true" title={link.hint}>
+                    <ArrowUpRight size={14} strokeWidth={2} />
+                    {link.label}
+                  </div>
+                  <div className="log-sel-sep" />
+                </>
+              )
+            })()}
+            {/* Include/Exclude are offered on tags only. Filtering on a whole
+                message body would pin the query to one record — the useful
+                message filter is a phrase, which the text-selection menu
+                already handles by letting the user pick one. */}
+            {!isMsg && hasValue && (
+              <>
+                <button className="log-sel-item" onClick={() => run(() => onAddChip({ field: menu.field, op: 'eq', value: menu.value }))}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Include
+                </button>
+                <button className="log-sel-item" onClick={() => run(() => onAddChip({ field: menu.field, op: 'neq', value: menu.value }))}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Exclude
+                </button>
+              </>
+            )}
+            {isMsg && (
+              <div className="log-sel-note">Select any phrase in the value to filter on it.</div>
+            )}
+            {!isMsg && (
+              <>
+                <div className="log-sel-sep" />
+                <button className="log-sel-item" onClick={() => run(() => onDistribution(menu.field, menu.x, menu.y))}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>
+                  View distribution
+                </button>
+              </>
+            )}
+            {hasValue && (
+              <>
+                <div className="log-sel-sep" />
+                <button className="log-sel-item" onClick={() => run(() => onCopy(menu.value, 'Value copied to clipboard'))}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                  Copy value
+                </button>
+              </>
+            )}
+          </div>
+        )
+      })()}
+    </aside>
   )
 }
 
@@ -868,6 +1237,13 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
     setChips(prev => prev.length === 0 ? [chip] : [...prev, { connector: 'AND', ...chip }])
   }, [setChips])
 
+  // Shared by every copy action in the record drawer, so all of them report
+  // through the same toast the query bar already uses.
+  const copyText = useCallback((text, message) => {
+    try { navigator.clipboard.writeText(text)?.catch(() => {}) } catch (_) {}
+    setToast?.(message)
+  }, [setToast])
+
   const applySelectionChip = useCallback((mode) => {
     if (!selMenu) return
     const { field, value, text } = selMenu
@@ -1155,6 +1531,9 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
   }), [visibleVolume])
 
   const selected = selectedId ? filtered.find(l => l.id === selectedId) : null
+  // Position within the rows currently on screen, so stepping through records
+  // walks the same list the table shows rather than the unfiltered set.
+  const selectedIndex = selectedId ? filtered.findIndex(l => l.id === selectedId) : -1
 
   return (
     <>
@@ -1567,29 +1946,17 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
       </div>
 
       {selected && (
-        <aside className="log-detail">
-          <div className="log-detail-head">
-            <div>
-              <div className="log-detail-title">Record</div>
-              <div className="log-detail-sub mono">{selected.dateStr}T{selected.timeStr}Z</div>
-            </div>
-            <button className="log-detail-close" onClick={() => setSelectedId(null)} aria-label="Close">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-          </div>
-          <div className="log-detail-body" data-log-content>
-            <div className="log-detail-msg">
-              <div className="log-detail-key">_msg</div>
-              <div className="log-detail-val mono">{highlightTerms(selected.message, searchTerms)}</div>
-            </div>
-            {Object.entries(selected.tags).map(([k, v]) => (
-              <div key={k} className="log-detail-field">
-                <span className="log-detail-key">{k}</span>
-                <span className="log-detail-val mono" data-log-field={k} data-log-value={v}>{v}</span>
-              </div>
-            ))}
-          </div>
-        </aside>
+        <LogRecordDrawer
+          record={selected}
+          onClose={() => setSelectedId(null)}
+          searchTerms={searchTerms}
+          onAddChip={addChipToQuery}
+          onDistribution={(field, x, y) => setDistField({ field, x, y })}
+          onCopy={copyText}
+          index={selectedIndex}
+          total={filtered.length}
+          onNavigate={(i) => { const row = filtered[i]; if (row) setSelectedId(row.id) }}
+        />
       )}
       </div>
     </div>
