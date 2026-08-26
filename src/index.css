@@ -1857,11 +1857,9 @@ tbody tr:hover { background: var(--panel-2); }
 .log-detail-close:hover { color: var(--text-primary); background: var(--panel-2); }
 .log-detail-close svg { width: 14px; height: 14px; }
 .log-detail-body { flex: 1; overflow-y: auto; padding: 4px 0 10px; }
-.log-detail-msg { padding: 10px 14px 12px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 4px; }
 .log-detail-key { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
 .log-detail-val { font-size: 12px; color: var(--text-primary); line-height: 1.5; word-break: break-word; }
-.log-detail-msg .log-detail-val.is-msg { font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
-.log-detail-field { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding: 7px 16px; align-items: start; font-size: 11px; }
+.log-detail-field { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding: 7px 16px; align-items: start; font-size: 11px; border-bottom: 1px solid var(--border-subtle); }
 .log-detail-field .log-detail-key { margin-bottom: 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding-top: 1px; }
 /* The values are the record. They were dimmer and smaller than the labels
    naming them, and truncated on top of that — a trace id or a stack trace was
@@ -1897,7 +1895,8 @@ tbody tr:hover { background: var(--panel-2); }
 /* ── Per-field action trigger ── */
 /* Reserved by the grid rather than revealed by display:none, so rows do not
    reflow on hover and the button stays reachable by keyboard. */
-.log-detail-field { grid-template-columns: 140px 1fr 20px; }
+.log-detail-field { grid-template-columns: 140px 1fr auto; }
+.log-detail-group:last-child .log-detail-field:last-child { border-bottom: none; }
 
 /* ── Pending-link affordance ── */
 /* The value carries brand colour and a dotted underline; the arrow sits
@@ -1923,8 +1922,8 @@ tbody tr:hover { background: var(--panel-2); }
 /* ── Field search ── */
 .log-detail-search {
   display: flex; align-items: center; gap: 7px;
-  margin: 8px 14px 4px; padding: 5px 8px;
-  background: var(--panel); border: 1px solid var(--border-subtle);
+  margin: 14px 14px 4px; padding: 5px 8px;
+  background: none; border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   transition: border-color .12s;
 }
@@ -1951,11 +1950,80 @@ tbody tr:hover { background: var(--panel-2); }
   font-size: 12px; color: var(--text-muted); line-height: 1.5;
 }
 
+/* ── Highlight cards: service · endpoint · trace_id ── */
+/* Boxed and side by side rather than in the list, because these are the fields
+   you look for first and the ones you carry to the next screen. */
+.log-detail-highlights {
+  display: grid; gap: 8px;
+  padding: 10px 16px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.log-hl-card {
+  min-width: 0;
+  background: none; border: 1px solid var(--border-subtle);
+  border-radius: 5px; padding: 7px 8px 8px 10px;
+  transition: background-color .12s;
+}
+.log-hl-card:hover { background: var(--panel); }
+.log-hl-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.log-hl-key {
+  font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+  text-transform: uppercase; letter-spacing: .5px; font-weight: 600;
+  color: var(--text-muted); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.log-hl-card .log-field-menu-btn { margin-right: -2px; }
+
+/* Two controls share the row's action column, so they sit side by side and the
+   column sizes to them rather than to a single button. */
+.log-field-actions {
+  display: flex; align-items: center; gap: 1px;
+  flex-shrink: 0; flex-wrap: nowrap;
+}
+
+.log-field-pin-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--text-muted); opacity: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 18px; border-radius: 3px;
+  transition: opacity .12s, color .12s, background-color .12s;
+}
+.log-detail-field:hover .log-field-pin-btn,
+.log-hl-card:hover .log-field-pin-btn,
+.log-field-pin-btn:focus-visible { opacity: 1; }
+.log-field-pin-btn:hover { color: var(--text-primary); background: var(--panel-2); }
+/* A set pin stays visible: it is state, not an affordance waiting to be found. */
+.log-field-pin-btn.is-pinned { opacity: 1; color: var(--brand-on-muted); }
+.log-field-pin-btn svg { width: 12px; height: 12px; }
+
+/* Pinned fields sit above everything, in the order they were pinned. The fill
+   marks the region — no padding or border of its own, so a row is the same
+   height and the same shape whether it is pinned or not. */
+.log-detail-pinned { background: var(--panel); }
+
+.log-field-menu-btn { margin-right: -2px; }
+.log-hl-value-row { display: flex; align-items: center; gap: 2px; min-width: 0; margin-top: 3px; }
+/* A trace id is 32 characters in a third of the panel — it truncates, and the
+   title carries the whole thing. */
+.log-hl-value {
+  flex: 1; min-width: 0;
+  font-size: 11.5px; color: var(--text-primary); line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.log-hl-value.is-empty { color: var(--text-muted); }
+.log-hl-value.is-link {
+  color: var(--brand-on-muted);
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 3px; text-decoration-thickness: 1px;
+}
+.log-hl-card:hover .log-link-hint { opacity: 1; }
+
 /* Field groups, divided the same way _msg is — a rule and a little air, no
    headings. The grouping is legible from the spacing; naming each block would
    add three labels to read before reaching the values they describe. */
-.log-detail-group { padding: 5px 0; border-bottom: 1px solid var(--border-subtle); }
-.log-detail-group:last-child { border-bottom: none; }
+/* Groups run flush. With every row ruled, padding at the boundaries only broke
+   the rhythm — the rules carry the structure on their own. */
+.log-detail-group { padding: 0; }
 
 /* A field whose value is a block rather than a line: the label keeps row one
    with the actions button, and the value spans the full width beneath it. */
@@ -1964,8 +2032,9 @@ tbody tr:hover { background: var(--panel-2); }
 .log-detail-field.is-block { row-gap: 8px; }
 .log-detail-field.is-block .log-detail-key { grid-column: 1; grid-row: 1; }
 .log-detail-field.is-block .log-stack-msg { grid-column: 2; grid-row: 1; }
-.log-detail-field.is-block .log-field-menu-btn { grid-column: 3; grid-row: 1; }
-.log-detail-field.is-block .log-stack-frames { grid-column: 1 / -1; grid-row: 2; }
+.log-detail-field.is-block .log-field-actions { grid-column: 3; grid-row: 1; }
+.log-detail-field.is-block .log-stack-frames,
+.log-detail-field.is-block .log-detail-val.is-msg { grid-column: 1 / -1; grid-row: 2; }
 
 /* ── Stack trace ── */
 /* The exception message is the field's value and sits on the label's line. */
@@ -1975,15 +2044,28 @@ tbody tr:hover { background: var(--panel-2); }
   white-space: pre-wrap; word-break: break-word;
 }
 
-/* The frames are the document: bounded so one field cannot own the panel,
-   scrollable so nothing is lost, indentation kept so call order stays readable. */
+/* The frames are the document: collapsed to two by default so one field cannot
+   own the panel, expandable in place, indentation kept so call order reads. */
 .log-stack-frames {
-  max-height: 168px; overflow: auto;
-  padding: 6px 0;
   background: var(--panel); border: 1px solid var(--border-subtle);
-  border-radius: 5px;
+  border-radius: 5px; overflow: hidden;
   font-family: 'JetBrains Mono', monospace; font-size: 11px;
 }
+.log-stack-scroll { padding: 6px 0; }
+/* Bounded even when open — a hundred-frame trace still scrolls rather than
+   pushing everything below it off the panel. */
+.log-stack-scroll.is-expanded { max-height: 168px; overflow: auto; }
+
+.log-stack-toggle {
+  display: flex; align-items: center; gap: 5px;
+  width: 100%; padding: 5px 10px;
+  background: none; border: none; border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary); cursor: pointer;
+  font-family: 'Rubik', sans-serif; font-size: 11px; text-align: left;
+  transition: color .12s, background-color .12s;
+}
+.log-stack-toggle:hover { color: var(--text-primary); background: var(--panel-2); }
+.log-stack-toggle svg { width: 12px; height: 12px; flex-shrink: 0; }
 /* `pre` keeps the leading tab that shows call depth; the row scrolls sideways
    rather than wrapping, so frames stay one-per-line and scannable. */
 .log-stack-frame {
