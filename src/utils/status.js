@@ -41,6 +41,17 @@ export function statusForErrorRate(pct) {
   return STATUS.healthy
 }
 
+// Log severity maps onto the shared status scale, so a level badge is coloured
+// by the same resolver as every other severity signal rather than by a palette
+// of its own. `info` is the informational blue, not healthy green — an info log
+// says nothing about health.
+export function statusForLogLevel(level) {
+  if (level === 'error') return STATUS.critical
+  if (level === 'warn') return STATUS.warning
+  if (level === 'info') return STATUS.info
+  return STATUS.neutral
+}
+
 export function worstStatus(...statuses) {
   const order = [STATUS.critical, STATUS.warning, STATUS.healthy, STATUS.info, STATUS.neutral]
   for (const s of order) {
