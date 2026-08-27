@@ -9,6 +9,8 @@ import AggregateResults from '@/components/AggregateResults'
 import { serializePipes, composeQuery, parsePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
 import { tryParseConditions, splitQuery, replacePipeSection, validatePipeText } from '@/utils/rawQuery'
 import PipePill, { PipePillChip } from '@/components/PipePill'
+import StatusBadge from '@/components/shared/StatusBadge'
+import { statusForLogLevel } from '@/utils/status'
 import AggregationPopover from '@/components/AggregationPopover'
 import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
@@ -538,9 +540,12 @@ function LinkMarker({ hint }) {
 // what you carry to the next screen.
 const HIGHLIGHT_FIELDS = ['service', 'endpoint', 'trace_id']
 
+// The failure leads, because on an error record it is the reason the record was
+// opened. On every other record the group is empty and drops out, so the routine
+// fields come first anyway — one ordering serves both.
 const FIELD_GROUPS = [
-  ['env', 'log.level', 'path', 'http.status', 'duration_ms'],
   ['log.exception.type', 'log.stacktrace'],
+  ['env', 'log.level', 'path', 'http.status', 'duration_ms'],
 ]
 
 // These exist only on error records. Elsewhere the rows are labels for things
@@ -625,6 +630,61 @@ function PinButton({ name, pinned, onToggle }) {
         <path d="M12 17v5"/><path d="M9 10.76V4h6v6.76l2 2.24v2H7v-2z"/>
       </svg>
     </button>
+  )
+}
+
+// The message is fixed at the top like the identity cards, so it takes a copy
+// button rather than the field menu, and cannot be pinned — it is already there.
+//
+// Clamping is done in CSS rather than by counting newlines, so a single long
+// line that wraps past two rows collapses the same way a multi-line one does.
+function MessageCard({ text, hits, onCopy }) {
+  const [expanded, setExpanded] = useState(false)
+  const [clamped, setClamped] = useState(false)
+  const valRef = useRef(null)
+
+  // A new record starts collapsed, which is also what lets the measurement
+  // below always run against the clamped height.
+  useEffect(() => { setExpanded(false) }, [text])
+
+  useEffect(() => {
+    const el = valRef.current
+    if (!el || expanded) return
+    setClamped(el.scrollHeight > el.clientHeight + 1)
+  }, [text, expanded])
+
+  return (
+    <div className="log-detail-field is-block">
+      <span className="log-detail-key">_msg</span>
+      <div
+        ref={valRef}
+        className={`log-detail-val is-msg mono log-msg-text${expanded ? ' is-expanded' : ''}`}
+      >{highlightTerms(String(text ?? ''), hits)}</div>
+      <div className="log-field-actions">
+        <button
+          type="button"
+          className="log-field-menu-btn"
+          aria-label="Copy message"
+          title="Copy message"
+          onClick={(e) => { e.stopPropagation(); onCopy(String(text ?? ''), 'Message copied to clipboard') }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+        {clamped && (
+          <button
+            type="button"
+            className="log-msg-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(v => !v)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d={expanded ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'} />
+            </svg>
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -762,25 +822,22 @@ function LogRecordDrawer({
   // The stack trace and its exception type are the two fields that cannot be
   // pinned: one is a block, and neither exists on most records, so pinning them
   // would leave a gap at the top of every non-error log.
-  const canPin = (k) => !ERROR_ONLY_FIELDS.has(k) && !HIGHLIGHT_FIELDS.includes(k)
+  const canPin = (k) => !ERROR_ONLY_FIELDS.has(k) && !HIGHLIGHT_FIELDS.includes(k) && k !== '_msg'
 
   // Pin order is insertion order, so the newest pin lands at the bottom of the
   // block and the ones above it never move.
   const pinnedRows = pinned
-    .filter(k => (k === '_msg' || k in record.tags) && matches(k, valueOf(k)))
+    .filter(k => canPin(k) && k in record.tags && matches(k, valueOf(k)))
     .map(k => [k, valueOf(k)])
 
-  const isPinned = (k) => pinned.includes(k)
-  // A card with no value is a box saying nothing, so it is dropped and the row
-  // reflows to however many are left — three, two, or one.
+  // All three show whatever the record holds. A missing endpoint is a fact
+  // about the record, and a row that changes width between logs is harder to
+  // read across than one that keeps its shape.
   const highlights = HIGHLIGHT_FIELDS
-    .filter(k => {
-      const v = record.tags[k]
-      return v != null && v !== '' && matches(k, v)
-    })
+    .filter(k => k in record.tags && matches(k, record.tags[k]))
     .map(k => [k, record.tags[k]])
 
-  const msgMatches = !isPinned('_msg') && matches('_msg', record.message)
+  const msgMatches = matches('_msg', record.message)
   const matchCount = groups.reduce((n, g) => n + g.length, 0)
     + pinnedRows.length + highlights.length + (msgMatches ? 1 : 0)
 
@@ -815,7 +872,13 @@ function LogRecordDrawer({
     <aside className="log-detail">
       <div className="log-detail-head">
         <div className="log-detail-heading">
-          <span className="log-detail-title">Record</span>
+          <div className="log-detail-title-row">
+            <span className="log-detail-title">Record</span>
+            <StatusBadge
+              status={statusForLogLevel(record.level)}
+              label={record.level.charAt(0).toUpperCase() + record.level.slice(1)}
+            />
+          </div>
           <div className="log-detail-sub mono">{record.dateStr}T{record.timeStr}Z</div>
         </div>
         <div className="log-detail-head-right">
@@ -911,17 +974,33 @@ function LogRecordDrawer({
                         </button>
                     </div>
                     <div className="log-hl-value-row">
-                      <span
-                        className={`log-hl-value mono${link ? ' is-link' : ''}`}
-                        title={String(v)}
-                        data-log-field={k}
-                        data-log-value={v}
-                      >{highlightTerms(String(v), hits)}</span>
-                      {link && <LinkMarker hint={link.hint} />}
+                      {v == null || v === '' ? (
+                        <span className="log-hl-value is-empty" aria-label="No value">—</span>
+                      ) : (
+                        <>
+                          <span
+                            className={`log-hl-value mono${link ? ' is-link' : ''}`}
+                            title={String(v)}
+                            data-log-field={k}
+                            data-log-value={v}
+                          >{highlightTerms(String(v), hits)}</span>
+                          {link && <LinkMarker hint={link.hint} />}
+                        </>
+                      )}
                     </div>
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {msgMatches && (
+            <div className="log-detail-group is-msg-card">
+              <MessageCard
+                text={record.message}
+                hits={q ? hits : searchTerms}
+                onCopy={onCopy}
+              />
             </div>
           )}
 
@@ -935,16 +1014,6 @@ function LogRecordDrawer({
                   onTogglePin={onTogglePin} onMenu={openMenu}
                 />
               ))}
-            </div>
-          )}
-
-          {msgMatches && (
-            <div className="log-detail-group">
-              <FieldRow
-                name="_msg" value={record.message} hits={q ? hits : searchTerms}
-                isMsg pinned={false} pinnable
-                onTogglePin={onTogglePin} onMenu={openMenu}
-              />
             </div>
           )}
           {groups.map((group, gi) => (

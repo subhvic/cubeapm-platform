@@ -1833,6 +1833,7 @@ tbody tr:hover { background: var(--panel-2); }
 }
 .log-detail-head { padding: 12px 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .log-detail-heading { min-width: 0; }
+.log-detail-title-row { display: flex; align-items: center; gap: 6px; }
 .log-detail-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 /* Navigation sits with the close button: both act on the panel itself rather
    than on the record's contents, so they read as one group. */
@@ -1923,7 +1924,7 @@ tbody tr:hover { background: var(--panel-2); }
 .log-detail-search {
   display: flex; align-items: center; gap: 7px;
   margin: 14px 14px 4px; padding: 5px 8px;
-  background: none; border: 1px solid var(--border-subtle);
+  background: var(--panel); border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   transition: border-color .12s;
 }
@@ -1955,8 +1956,7 @@ tbody tr:hover { background: var(--panel-2); }
    you look for first and the ones you carry to the next screen. */
 .log-detail-highlights {
   display: grid; gap: 8px;
-  padding: 10px 16px 18px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 16px 12px;
 }
 .log-hl-card {
   min-width: 0;
@@ -2024,6 +2024,43 @@ tbody tr:hover { background: var(--panel-2); }
 /* Groups run flush. With every row ruled, padding at the boundaries only broke
    the rhythm — the rules carry the structure on their own. */
 .log-detail-group { padding: 0; }
+
+/* The message gets the identity cards' treatment — outlined, rounded, filling
+   on hover — but as one box across the row, since it is prose rather than a
+   value that sits beside two others. */
+.log-detail-group.is-msg-card {
+  padding: 0 16px 24px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.log-detail-group.is-msg-card .log-detail-field {
+  padding: 8px 10px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: none;
+  transition: background-color .12s;
+}
+.log-detail-group.is-msg-card .log-detail-field:hover { background: var(--panel); }
+
+/* Two lines by default. Clamping rather than slicing the string keeps a long
+   wrapped line and a multi-line one behaving identically. */
+.log-msg-text {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.log-msg-text.is-expanded { display: block; overflow: visible; }
+
+/* Sits with the copy button in the card's top-right corner, to its right. */
+.log-msg-toggle {
+  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+  margin-left: 4px; padding: 1px 4px; border-radius: 3px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary); white-space: nowrap;
+  font-family: 'Rubik', sans-serif; font-size: 11px;
+  transition: color .12s, background-color .12s;
+}
+.log-msg-toggle:hover { color: var(--brand-on-muted); background: var(--panel-2); }
+.log-msg-toggle:hover { color: var(--brand-on-muted); }
+.log-msg-toggle svg { width: 12px; height: 12px; flex-shrink: 0; }
 
 /* A field whose value is a block rather than a line: the label keeps row one
    with the actions button, and the value spans the full width beneath it. */
