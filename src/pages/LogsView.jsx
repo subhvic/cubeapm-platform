@@ -731,6 +731,17 @@ function StackTrace({ text }) {
   )
 }
 
+// How old the record is, in days, read the way people say it. Compared by
+// calendar day rather than elapsed hours: a log from 23:55 seen at 00:05 is
+// "yesterday", not "today", even though only ten minutes have passed.
+function relativeDayLabel(date, now = new Date()) {
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86400000)
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  return `${days} days ago`
+}
+
 // The record as one object — what the JSON view renders and Copy JSON writes.
 // Mirrors what the Fields view lists: timestamp and message alongside the tags.
 //
@@ -879,7 +890,10 @@ function LogRecordDrawer({
               label={record.level.charAt(0).toUpperCase() + record.level.slice(1)}
             />
           </div>
-          <div className="log-detail-sub mono">{record.dateStr}T{record.timeStr}Z</div>
+          <div className="log-detail-sub mono">
+            {record.dateStr}T{record.timeStr}Z
+            <span className="log-detail-age">({relativeDayLabel(record.time)})</span>
+          </div>
         </div>
         <div className="log-detail-head-right">
           {total > 1 && (
