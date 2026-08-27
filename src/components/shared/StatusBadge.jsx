@@ -15,7 +15,7 @@ export default function StatusBadge({ status, label, className = '' }) {
   return (
     <span
       className={clsx(
-        'inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-medium text-white',
+        'inline-flex items-center px-2 py-[3px] rounded-[2px] text-[11px] font-medium text-white',
         BADGE_STYLES[status] || BADGE_STYLES.neutral,
         className
       )}

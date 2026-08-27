@@ -545,7 +545,7 @@ const HIGHLIGHT_FIELDS = ['service', 'endpoint', 'trace_id']
 // fields come first anyway — one ordering serves both.
 const FIELD_GROUPS = [
   ['log.exception.type', 'log.stacktrace'],
-  ['env', 'log.level', 'path', 'http.status', 'duration_ms'],
+  ['env', 'log.level', 'service', 'endpoint', 'trace_id', 'path', 'http.status', 'duration_ms'],
 ]
 
 // These exist only on error records. Elsewhere the rows are labels for things
@@ -563,7 +563,7 @@ function isHiddenField(k, v) {
 
 function recordFieldGroups(log) {
   const tags = log.tags
-  const named = new Set([...FIELD_GROUPS.flat(), ...HIGHLIGHT_FIELDS])
+  const named = new Set(FIELD_GROUPS.flat())
   const groups = FIELD_GROUPS.map(keys => keys
     .filter(k => k in tags && !isHiddenField(k, tags[k]))
     .map(k => [k, tags[k]]))
@@ -633,29 +633,37 @@ function PinButton({ name, pinned, onToggle }) {
   )
 }
 
+// What the message row is called in the Overview. The record's own field is
+// still _msg — that is what the JSON view shows and what a chip filters on —
+// but "text" is what the column is called in the table this drawer opens from.
+const MSG_LABEL = 'text'
+
 // The message is fixed at the top like the identity cards, so it takes a copy
 // button rather than the field menu, and cannot be pinned — it is already there.
 //
 // Clamping is done in CSS rather than by counting newlines, so a single long
 // line that wraps past two rows collapses the same way a multi-line one does.
 function MessageCard({ text, hits, onCopy }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const [clamped, setClamped] = useState(false)
   const valRef = useRef(null)
 
-  // A new record starts collapsed, which is also what lets the measurement
-  // below always run against the clamped height.
-  useEffect(() => { setExpanded(false) }, [text])
+  useEffect(() => { setExpanded(true) }, [text])
 
+  // Measured by line count rather than by comparing scrollHeight to clientHeight:
+  // the box is only shorter than its content while collapsed, so a height
+  // comparison would report nothing to collapse whenever it is already open.
+  // scrollHeight carries the full content in either state.
   useEffect(() => {
     const el = valRef.current
-    if (!el || expanded) return
-    setClamped(el.scrollHeight > el.clientHeight + 1)
-  }, [text, expanded])
+    if (!el) return
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 1
+    setClamped(Math.round(el.scrollHeight / lineHeight) > 2)
+  }, [text])
 
   return (
     <div className="log-detail-field is-block">
-      <span className="log-detail-key">_msg</span>
+      <span className="log-detail-key">{highlightTerms(MSG_LABEL, hits)}</span>
       <div
         ref={valRef}
         className={`log-detail-val is-msg mono log-msg-text${expanded ? ' is-expanded' : ''}`}
@@ -760,9 +768,34 @@ function toRecord(log) {
 
 // One JSON line. Recurses on objects so a nested payload renders correctly if
 // the data ever grows one — today every record is flat.
-function JsonRow({ path, name, value, depth, last, onKeyMenu }) {
-  const pad = { paddingLeft: `${depth * 14}px` }
-  const key = (
+// Flattens the record into the lines a JSON document would have, so each one
+// can carry a number. Recursing here rather than in the renderer keeps line
+// numbering a simple index — a nested object spans several lines, and a
+// component that returns a fragment cannot number its own output.
+function jsonLines(data) {
+  const out = [{ kind: 'open', depth: 0 }]
+  const walk = (obj, depth, prefix) => {
+    const entries = Object.entries(obj)
+    entries.forEach(([name, value], i) => {
+      const path = prefix ? `${prefix}.${name}` : name
+      const comma = i < entries.length - 1
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        out.push({ kind: 'open', depth, name, path, value })
+        walk(value, depth + 1, path)
+        out.push({ kind: 'close', depth, comma })
+      } else {
+        out.push({ kind: 'pair', depth, name, path, value, comma })
+      }
+    })
+  }
+  walk(data, 1, '')
+  out.push({ kind: 'close', depth: 0 })
+  return out
+}
+
+function JsonLine({ line, number, onKeyMenu }) {
+  const { kind, depth, name, path, value, comma } = line
+  const keyBtn = name != null && (
     <button
       type="button"
       className="log-json-key"
@@ -770,32 +803,33 @@ function JsonRow({ path, name, value, depth, last, onKeyMenu }) {
       title={`Actions for ${path}`}
     >"{name}"</button>
   )
-
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const entries = Object.entries(value)
-    return (
-      <>
-        <div className="log-json-line" style={pad}>{key}<span className="log-json-punc">: {'{'}</span></div>
-        {entries.map(([k, v], i) => (
-          <JsonRow key={k} path={`${path}.${k}`} name={k} value={v} depth={depth + 1}
-            last={i === entries.length - 1} onKeyMenu={onKeyMenu} />
-        ))}
-        <div className="log-json-line" style={pad}><span className="log-json-punc">{'}'}{last ? '' : ','}</span></div>
-      </>
-    )
-  }
-
   const isNum = typeof value === 'number'
-  const link = linkFor(name, value)
+  const link = kind === 'pair' ? linkFor(name, value) : null
+
   return (
-    <div className="log-json-line" style={pad}>
-      {key}
-      <span className="log-json-punc">: </span>
-      <span className={`log-json-val${isNum ? ' num' : ''}`}>
-        {isNum ? String(value) : JSON.stringify(value ?? '')}
+    <div className="log-json-line">
+      <span className="log-json-ln" aria-hidden="true">{number}</span>
+      {/* Indented in `ch` so the step lands on the monospace grid, the way an
+          editor would show it, rather than on an arbitrary pixel value. */}
+      <span className="log-json-code" style={{ paddingLeft: `${depth * 2}ch` }}>
+        {kind === 'open' && (
+          name == null
+            ? <span className="log-json-punc">{'{'}</span>
+            : <>{keyBtn}<span className="log-json-punc">: {'{'}</span></>
+        )}
+        {kind === 'close' && <span className="log-json-punc">{'}'}{comma ? ',' : ''}</span>}
+        {kind === 'pair' && (
+          <>
+            {keyBtn}
+            <span className="log-json-punc">: </span>
+            <span className={`log-json-val${isNum ? ' num' : ''}`}>
+              {isNum ? String(value) : JSON.stringify(value ?? '')}
+            </span>
+            <span className="log-json-punc">{comma ? ',' : ''}</span>
+            {link && <LinkMarker hint={link.hint} />}
+          </>
+        )}
       </span>
-      <span className="log-json-punc">{last ? '' : ','}</span>
-      {link && <LinkMarker hint={link.hint} />}
     </div>
   )
 }
@@ -813,8 +847,17 @@ function LogRecordDrawer({
   const [view, setView] = useState('fields')
   const [menu, setMenu] = useState(null)   // { field, value, x, y }
   const [fieldQuery, setFieldQuery] = useState('')
-  const hasPrev = index > 0
-  const hasNext = index >= 0 && index < total - 1
+  // Navigation runs on time, not position: logs are ordered newest-first and
+  // paginated, so a total is only ever "what has loaded" and an ordinal would
+  // describe that window rather than the result set. Newest is always knowable —
+  // it is the top of the list — while oldest is not, so the jump anchor has no
+  // counterpart.
+  //
+  // Once the backend paginates, Older at the loaded edge should fetch the next
+  // page rather than disable; the in-flight and stale states for that already
+  // exist on the query path.
+  const hasNewer = index > 0
+  const hasOlder = index >= 0 && index < total - 1
 
   // Matches a field on either half of the pair. Someone looking for "payment"
   // is as likely to be hunting the value as the field holding it, and which one
@@ -833,12 +876,18 @@ function LogRecordDrawer({
   // The stack trace and its exception type are the two fields that cannot be
   // pinned: one is a block, and neither exists on most records, so pinning them
   // would leave a gap at the top of every non-error log.
-  const canPin = (k) => !ERROR_ONLY_FIELDS.has(k) && !HIGHLIGHT_FIELDS.includes(k) && k !== '_msg'
+  // Every list field can be pinned. The message cannot: it already has a fixed
+  // place of its own above, so pinning it would only move it a few pixels.
+  const canPin = (k) => k !== '_msg'
 
   // Pin order is insertion order, so the newest pin lands at the bottom of the
   // block and the ones above it never move.
+  // isHiddenField applies here too: a pinned stack trace is still absent from a
+  // record that did not throw, and should leave no empty row behind when it is.
+  // The pin itself survives — it reappears on the next error record.
   const pinnedRows = pinned
-    .filter(k => canPin(k) && k in record.tags && matches(k, valueOf(k)))
+    .filter(k => canPin(k) && k in record.tags
+      && !isHiddenField(k, valueOf(k)) && matches(k, valueOf(k)))
     .map(k => [k, valueOf(k)])
 
   // All three show whatever the record holds. A missing endpoint is a fact
@@ -848,7 +897,7 @@ function LogRecordDrawer({
     .filter(k => k in record.tags && matches(k, record.tags[k]))
     .map(k => [k, record.tags[k]])
 
-  const msgMatches = matches('_msg', record.message)
+  const msgMatches = matches(MSG_LABEL, record.message) || matches('_msg', record.message)
   const matchCount = groups.reduce((n, g) => n + g.length, 0)
     + pinnedRows.length + highlights.length + (msgMatches ? 1 : 0)
 
@@ -884,7 +933,6 @@ function LogRecordDrawer({
       <div className="log-detail-head">
         <div className="log-detail-heading">
           <div className="log-detail-title-row">
-            <span className="log-detail-title">Record</span>
             <StatusBadge
               status={statusForLogLevel(record.level)}
               label={record.level.charAt(0).toUpperCase() + record.level.slice(1)}
@@ -897,23 +945,25 @@ function LogRecordDrawer({
         </div>
         <div className="log-detail-head-right">
           {total > 1 && (
-              <nav className="log-detail-nav" aria-label="Record navigation">
-                <button onClick={() => onNavigate(0)} disabled={!hasPrev} title="First record" aria-label="First record">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 18L10 12l8-6"/><path d="M6 5v14"/></svg>
-                </button>
-                <button onClick={() => onNavigate(index - 1)} disabled={!hasPrev} title="Previous record" aria-label="Previous record">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-                </button>
-                <span className="log-detail-pos">
-                  <span className="mono cur">{index + 1}</span> of <span className="mono">{total.toLocaleString()}</span>
-                </span>
-                <button onClick={() => onNavigate(index + 1)} disabled={!hasNext} title="Next record" aria-label="Next record">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-                </button>
-                <button onClick={() => onNavigate(total - 1)} disabled={!hasNext} title="Last record" aria-label="Last record">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 18l8-6-8-6"/><path d="M18 5v14"/></svg>
-                </button>
-              </nav>
+            <nav className="log-detail-nav" aria-label="Record navigation">
+              <button
+                className="icon-only"
+                onClick={() => onNavigate(0)}
+                disabled={!hasNewer}
+                title="Jump to newest record"
+                aria-label="Jump to newest record"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 4h14"/><path d="M12 21V9"/><path d="M6 15l6-6 6 6"/></svg>
+              </button>
+              <button onClick={() => onNavigate(index - 1)} disabled={!hasNewer} title="Newer record">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                Newer
+              </button>
+              <button onClick={() => onNavigate(index + 1)} disabled={!hasOlder} title="Older record">
+                Older
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </nav>
           )}
           <button className="log-detail-close" onClick={onClose} aria-label="Close">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -936,6 +986,48 @@ function LogRecordDrawer({
           </button>
         )}
       </div>
+
+        {view === 'fields' && highlights.length > 0 && (
+          <div
+            className="log-detail-highlights"
+            style={{ gridTemplateColumns: `repeat(${highlights.length}, minmax(0, 1fr))` }}
+          >
+            {highlights.map(([k, v]) => {
+              const link = linkFor(k, v)
+              return (
+                <div className="log-hl-card" key={k}>
+                  <div className="log-hl-head">
+                    <span className="log-hl-key">{highlightTerms(k, hits)}</span>
+                    <button
+                        type="button"
+                        className="log-field-menu-btn"
+                        aria-label={`Actions for ${k}`}
+                        title={`Actions for ${k}`}
+                        onClick={(e) => { e.stopPropagation(); openMenu(k, v, e.currentTarget) }}
+                      >
+                        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+                      </button>
+                  </div>
+                  <div className="log-hl-value-row">
+                    {v == null || v === '' ? (
+                      <span className="log-hl-value is-empty" aria-label="No value">—</span>
+                    ) : (
+                      <>
+                        <span
+                          className={`log-hl-value mono${link ? ' is-link' : ''}`}
+                          title={String(v)}
+                          data-log-field={k}
+                          data-log-value={v}
+                        >{highlightTerms(String(v), hits)}</span>
+                        {link && <LinkMarker hint={link.hint} />}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
       {/* Overview only. Filtering the JSON view would hand back something that
           reads as the record but no longer parses as one. */}
@@ -966,48 +1058,6 @@ function LogRecordDrawer({
               No field or value matches <span className="mono">{fieldQuery.trim()}</span>
             </div>
           )}
-          {highlights.length > 0 && (
-            <div
-              className="log-detail-highlights"
-              style={{ gridTemplateColumns: `repeat(${highlights.length}, minmax(0, 1fr))` }}
-            >
-              {highlights.map(([k, v]) => {
-                const link = linkFor(k, v)
-                return (
-                  <div className="log-hl-card" key={k}>
-                    <div className="log-hl-head">
-                      <span className="log-hl-key">{highlightTerms(k, hits)}</span>
-                      <button
-                          type="button"
-                          className="log-field-menu-btn"
-                          aria-label={`Actions for ${k}`}
-                          title={`Actions for ${k}`}
-                          onClick={(e) => { e.stopPropagation(); openMenu(k, v, e.currentTarget) }}
-                        >
-                          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
-                        </button>
-                    </div>
-                    <div className="log-hl-value-row">
-                      {v == null || v === '' ? (
-                        <span className="log-hl-value is-empty" aria-label="No value">—</span>
-                      ) : (
-                        <>
-                          <span
-                            className={`log-hl-value mono${link ? ' is-link' : ''}`}
-                            title={String(v)}
-                            data-log-field={k}
-                            data-log-value={v}
-                          >{highlightTerms(String(v), hits)}</span>
-                          {link && <LinkMarker hint={link.hint} />}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
           {msgMatches && (
             <div className="log-detail-group is-msg-card">
               <MessageCard
@@ -1045,12 +1095,9 @@ function LogRecordDrawer({
       ) : (
         <div className="log-detail-body log-json-body">
           <div className="log-json">
-            <div className="log-json-line"><span className="log-json-punc">{'{'}</span></div>
-            {Object.entries(json).map(([k, v], i, arr) => (
-              <JsonRow key={k} path={k} name={k} value={v} depth={1}
-                last={i === arr.length - 1} onKeyMenu={openMenu} />
+            {jsonLines(json).map((line, i) => (
+              <JsonLine key={i} line={line} number={i + 1} onKeyMenu={openMenu} />
             ))}
-            <div className="log-json-line"><span className="log-json-punc">{'}'}</span></div>
           </div>
         </div>
       )}
@@ -1096,6 +1143,12 @@ function LogRecordDrawer({
                   Exclude
                 </button>
               </>
+            )}
+            {!isMsg && (
+              <button className="log-sel-item" onClick={() => run(() => onAddChip({ field: menu.field, op: 'exists' }))}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                Exists
+              </button>
             )}
             {isMsg && (
               <div className="log-sel-note">Select any phrase in the value to filter on it.</div>
