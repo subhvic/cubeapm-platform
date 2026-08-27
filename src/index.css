@@ -1834,25 +1834,24 @@ tbody tr:hover { background: var(--panel-2); }
 .log-detail-head { padding: 12px 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .log-detail-heading { min-width: 0; }
 .log-detail-title-row { display: flex; align-items: center; gap: 6px; }
-.log-detail-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 /* Navigation sits with the close button: both act on the panel itself rather
    than on the record's contents, so they read as one group. */
 .log-detail-head-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.log-detail-nav { display: flex; align-items: center; gap: 1px; }
+.log-detail-nav { display: flex; align-items: center; gap: 2px; }
+/* Newer and Older carry visible labels: an arrow alone cannot say which way is
+   forward in time, and both directions are plausible readings of a chevron. */
 .log-detail-nav button {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; padding: 0; border-radius: 4px;
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 24px; padding: 0 7px; border-radius: 4px;
   background: none; border: none; cursor: pointer;
-  color: var(--text-muted); transition: color .12s, background-color .12s;
+  color: var(--text-muted); white-space: nowrap;
+  font-family: 'Rubik', sans-serif; font-size: 11.5px;
+  transition: color .12s, background-color .12s;
 }
+.log-detail-nav button.icon-only { width: 24px; padding: 0; justify-content: center; }
 .log-detail-nav button:hover:not(:disabled) { color: var(--text-primary); background: var(--panel-2); }
 .log-detail-nav button:disabled { opacity: .3; cursor: default; }
-.log-detail-nav button svg { width: 15px; height: 15px; }
-.log-detail-pos {
-  font-size: 12px; color: var(--text-secondary); padding: 0 5px; white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.log-detail-pos .cur { color: var(--brand-on-muted); font-weight: 500; }
+.log-detail-nav button svg { width: 14px; height: 14px; flex-shrink: 0; }
 .log-detail-sub { font-size: 11.5px; color: var(--text-secondary); margin-top: 5px; }
 /* Set in the UI face, not the mono one: it is an annotation about the
    timestamp rather than part of the machine-readable value. */
@@ -1864,10 +1863,10 @@ tbody tr:hover { background: var(--panel-2); }
 .log-detail-close:hover { color: var(--text-primary); background: var(--panel-2); }
 .log-detail-close svg { width: 14px; height: 14px; }
 .log-detail-body { flex: 1; overflow-y: auto; padding: 4px 0 10px; }
-.log-detail-key { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
+.log-detail-key { font-size: 10.5px; color: var(--text-muted); letter-spacing: .2px; font-weight: 600; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
 .log-detail-val { font-size: 12px; color: var(--text-primary); line-height: 1.5; word-break: break-word; }
 .log-detail-field { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding: 7px 16px; align-items: start; font-size: 11px; border-bottom: 1px solid var(--border-subtle); }
-.log-detail-field .log-detail-key { margin-bottom: 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding-top: 1px; }
+.log-detail-field .log-detail-key { margin-bottom: 0; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; padding-top: 1px; }
 /* The values are the record. They were dimmer and smaller than the labels
    naming them, and truncated on top of that — a trace id or a stack trace was
    unreadable without opening the JSON view. */
@@ -1929,8 +1928,8 @@ tbody tr:hover { background: var(--panel-2); }
 /* ── Field search ── */
 .log-detail-search {
   display: flex; align-items: center; gap: 7px;
-  margin: 14px 14px 4px; padding: 5px 8px;
-  background: var(--panel); border: 1px solid var(--border-subtle);
+  margin: 0 16px 20px; padding: 5px 8px;
+  background: none; border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   transition: border-color .12s;
 }
@@ -1962,7 +1961,7 @@ tbody tr:hover { background: var(--panel-2); }
    you look for first and the ones you carry to the next screen. */
 .log-detail-highlights {
   display: grid; gap: 8px;
-  padding: 10px 16px 12px;
+  padding: 14px 16px 12px;
 }
 .log-hl-card {
   min-width: 0;
@@ -1972,9 +1971,11 @@ tbody tr:hover { background: var(--panel-2); }
 }
 .log-hl-card:hover { background: var(--panel); }
 .log-hl-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+/* True case, like the facet titles in the sidebar: these are field names, and
+   the query language is case-sensitive about them. */
 .log-hl-key {
-  font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
-  text-transform: uppercase; letter-spacing: .5px; font-weight: 600;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  letter-spacing: .2px; font-weight: 600;
   color: var(--text-muted); min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -2035,17 +2036,15 @@ tbody tr:hover { background: var(--panel-2); }
    on hover — but as one box across the row, since it is prose rather than a
    value that sits beside two others. */
 .log-detail-group.is-msg-card {
-  padding: 0 16px 24px;
+  padding: 0 16px 12px;
   border-bottom: 1px solid var(--border-subtle);
 }
 .log-detail-group.is-msg-card .log-detail-field {
   padding: 8px 10px 9px;
   border: 1px solid var(--border-subtle);
   border-radius: 5px;
-  background: none;
-  transition: background-color .12s;
+  background: var(--panel);
 }
-.log-detail-group.is-msg-card .log-detail-field:hover { background: var(--panel); }
 
 /* Two lines by default. Clamping rather than slicing the string keeps a long
    wrapped line and a multi-line one behaving identically. */
@@ -2072,7 +2071,7 @@ tbody tr:hover { background: var(--panel-2); }
    with the actions button, and the value spans the full width beneath it. */
 /* Row one is an ordinary field row — label, value, actions. Only the block
    itself drops beneath and takes the full width. */
-.log-detail-field.is-block { row-gap: 8px; }
+.log-detail-field.is-block { row-gap: 8px; padding-bottom: 9px; }
 .log-detail-field.is-block .log-detail-key { grid-column: 1; grid-row: 1; }
 .log-detail-field.is-block .log-stack-msg { grid-column: 2; grid-row: 1; }
 .log-detail-field.is-block .log-field-actions { grid-column: 3; grid-row: 1; }
@@ -2152,7 +2151,18 @@ tbody tr:hover { background: var(--panel-2); }
   font-size: 10.5px; line-height: 1.65;
   color: var(--text-secondary);
 }
-.log-json-line { padding: 0 14px; }
+/* A number gutter and a code column. The gutter is unselectable so dragging
+   across the view copies the JSON and not the line numbers with it. */
+.log-json-line {
+  display: grid; grid-template-columns: 2.25em 1fr; gap: 12px;
+  padding: 0 14px;
+}
+.log-json-ln {
+  text-align: right; color: var(--text-muted); opacity: .55;
+  font-variant-numeric: tabular-nums;
+  user-select: none; -webkit-user-select: none;
+}
+.log-json-code { min-width: 0; }
 .log-json-punc { color: var(--text-muted); }
 .log-json-key {
   background: none; border: none; padding: 0; cursor: pointer;
