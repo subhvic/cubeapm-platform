@@ -3027,9 +3027,13 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 @keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(-14px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
 /* ============ scrollbar ============ */
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: var(--border-panel); border-radius: 5px; }
+/* Deliberately hairline. At this width the bar is a position indicator rather
+   than a grab handle, so the thumb is given a stronger colour to stay visible
+   and Firefox is told `thin` — its narrowest supported setting. */
+::-webkit-scrollbar { width: 2px; height: 2px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
 ::-webkit-scrollbar-track { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
 /* ============ responsive ============ */
 @media (max-width: 1080px) {
