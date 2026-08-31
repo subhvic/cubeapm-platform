@@ -1954,7 +1954,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
         <div className="logs-filters-head">
           <span>Filters</span>
           {facetState.size > 0 && (
-            <button className="logs-filters-clear" onClick={clearAllFacets}>Clear all</button>
+            <button className="logs-filters-clear" onClick={clearAllFacets}>Reset All</button>
           )}
         </div>
         {/* The facets scroll; the header does not, so "Clear all" stays reachable
