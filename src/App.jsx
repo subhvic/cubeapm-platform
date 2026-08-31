@@ -9,6 +9,7 @@ import HomePage from '@/pages/HomePage'
 import ServiceOverview from '@/pages/ServiceOverview'
 import LogsView from '@/pages/LogsView'
 import InfraView from '@/pages/InfraView'
+import TraceDetail from '@/pages/TraceDetail'
 import LoginPage from '@/pages/LoginPage'
 import DesignSystemPage from '@/pages/DesignSystemPage'
 import { services, redEndpoints } from '@/data/services'
@@ -50,10 +51,13 @@ export default function App() {
     const path = location.pathname
     if (path === '/logs') return 'logs'
     if (path === '/infrastructure') return 'infra'
+    if (path.startsWith('/trace/')) return 'trace'
     if (path.startsWith('/service/')) return 'service'
     return 'home'
   })
   const [serviceId, setServiceId] = useState('payment-service')
+  const [traceId, setTraceId] = useState(() => location.pathname.split('/trace/')[1] ?? '')
+  const [logsQuery, setLogsQuery] = useState(null)
   const [navCollapsed, setNavCollapsed] = useState(true)
   const [timeRange, setTimeRange] = useState('Last 1 hour')
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -63,6 +67,31 @@ export default function App() {
   const [infraHost, setInfraHost] = useState(null)
   const [infraExpanded, setInfraExpanded] = useState({})
   const [hiddenNavItems, setHiddenNavItems] = useState(() => new Set())
+
+  const openTrace = useCallback((id) => {
+    setTraceId(id)
+    setView('trace')
+    setSettingsOpen(false)
+  }, [])
+
+  // Kept in App because a link may cross pages: a record in Logs can send you
+  // to a trace, a service or an infrastructure resource, and only App knows how
+  // to reach all three.
+  const openLink = useCallback((link) => {
+    if (!link) return
+    if (link.view === 'traces') return openTrace(link.traceId)
+    if (link.view === 'service') { setServiceId(link.serviceId); setServiceSubTab('overview'); setView('service'); return }
+    if (link.view === 'infra') {
+      setInfraSource(link.source)
+      setInfraHost(link.resource ?? null)
+      setView('infra')
+    }
+  }, [openTrace])
+
+  const openLogsForTrace = useCallback((id) => {
+    setLogsQuery({ concept: 'traceId', field: 'trace_id', value: id })
+    setView('logs')
+  }, [])
 
   const selectService = useCallback((id) => {
     setServiceId(id)
@@ -118,7 +147,8 @@ export default function App() {
     else if (view === 'logs') navigate('/logs')
     else if (view === 'infra') navigate('/infrastructure')
     else if (view === 'service' && serviceId) navigate(`/service/${serviceId}`)
-  }, [view, serviceId, navigate, isDesignSystem])
+    else if (view === 'trace' && traceId) navigate(`/trace/${traceId}`)
+  }, [view, serviceId, traceId, navigate, isDesignSystem])
 
   if (isDesignSystem) {
     return <DesignSystemPage theme={theme} setTheme={setTheme} />
@@ -131,6 +161,7 @@ export default function App() {
   const isService = view === 'service'
   const isLogs = view === 'logs'
   const isInfra = view === 'infra'
+  const isTrace = view === 'trace'
 
   return (
     <div className={`app${navCollapsed ? ' nav-collapsed' : ''}`}>
@@ -230,8 +261,24 @@ export default function App() {
                 timeRange={timeRange}
                 setTimeRange={setTimeRange}
               />
+            ) : isTrace ? (
+              <TraceDetail
+                key={traceId}
+                traceId={traceId}
+                goHome={goHome}
+                goLogs={openLogsForTrace}
+                timeRange={timeRange}
+                setTimeRange={setTimeRange}
+                settingsOpen={settingsOpen}
+                setSettingsOpen={setSettingsOpen}
+              />
             ) : isLogs ? (
-              <LogsView goHome={goHome} timeRange={timeRange} setTimeRange={setTimeRange} setToast={setToast} />
+              <LogsView
+                goHome={goHome} timeRange={timeRange} setTimeRange={setTimeRange} setToast={setToast}
+                onOpenLink={openLink}
+                incomingChip={logsQuery}
+                onIncomingChipApplied={() => setLogsQuery(null)}
+              />
             ) : isInfra ? (
               <InfraView
                 key={infraSource}

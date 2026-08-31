@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, Res
 import { logRows, logVolume, logFacets, BASE_TIME } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
 import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue } from '@/components/QueryBuilder'
-import { flattenLeaves } from '@/utils/queryTree'
+import { flattenLeaves, newGroup } from '@/utils/queryTree'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
 import { serializePipes, composeQuery, parsePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
@@ -20,7 +20,7 @@ import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRigh
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
-  recordType, recordTitle, TYPE_LABELS, durationGloss, conceptOf,
+  recordType, recordTitle, TYPE_LABELS, durationGloss, conceptOf, ALIASES,
 } from '@/utils/logFields'
 
 const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
@@ -517,32 +517,33 @@ function linkFor(field, value, record) {
   return resolveLink({ field, value, record, knownServices: KNOWN_SERVICES })
 }
 
-// Marks a value as a doorway. Not a button: there is nothing to press yet, and
-// a control that swallows clicks teaches people the feature is broken.
-function LinkMarker({ link }) {
+// Marks a value as a doorway, and opens it when there is somewhere to go.
+function LinkMarker({ link, onOpen }) {
   // Guarded because this is a decoration: if a caller ever stops passing a
   // link, the field should lose its marker, not blank the whole drawer.
   if (!link) return null
   const filter = link.kind === 'filter'
+  const icon = filter
+    ? <FilterIcon size={10} strokeWidth={2.25} />
+    : <ArrowUpRight size={11} strokeWidth={2.25} />
+
+  // An open link goes somewhere, so it is a button. A filter marker is not:
+  // the filter itself is offered in the field menu, where include and exclude
+  // already live, and a second way to press it would be two answers to one
+  // question.
+  if (filter || !onOpen) {
+    return (
+      <span className={`log-link-hint${filter ? ' is-filter' : ''}`}
+        role="img" aria-label={link.hint} title={link.hint}>{icon}</span>
+    )
+  }
   return (
-    <span className={`log-link-hint${filter ? ' is-filter' : ''}`}
-      role="img" aria-label={link.hint} title={link.hint}>
-      {filter
-        ? <FilterIcon size={10} strokeWidth={2.25} />
-        : <ArrowUpRight size={11} strokeWidth={2.25} />}
-    </span>
+    <button type="button" className="log-link-hint is-open"
+      aria-label={link.label} title={link.hint}
+      onClick={(e) => { e.stopPropagation(); onOpen(link) }}>{icon}</button>
   )
 }
 
-// How the Overview lays the record out: where it came from, what the request
-// did, and how it failed. Grouping beats one long list because the questions
-// you bring to a log are asked of one group at a time.
-//
-// Anything not named here still renders, in a group of its own at the end — a
-// new tag should appear in the panel without a code change here.
-// The three fields that answer "what is this record about" — pulled to the top
-// as cards, above the message, because they are what you look for first and
-// what you carry to the next screen.
 // These exist only on error records. Elsewhere the rows are labels for things
 // that are not there, which reads as missing data rather than as "this log did
 // not throw" - and since they are a whole group, an info record would otherwise
@@ -563,19 +564,12 @@ function recordFieldGroups(log) {
   return fieldGroupsFor(log, { isHidden: isHiddenField })
 }
 
-// A stack trace is the one field that is a document rather than a value. Left
-// as flowing text it either gets truncated to uselessness or runs for half the
-// panel, and its indentation — the thing that makes a trace scannable — is lost.
-//
-// So it gets its own bounded, scrollable box with the original whitespace kept,
-// and the first line separated from the frames: the exception message is what
-// you read, the frames are what you scan.
 // The SDK's resource block and the Kubernetes API's managedFields are on every
 // record of their kind, identical every time. Sorted alphabetically they are
 // the first screen of the record, which is how a drawer opens on a wall of
 // things nobody came to read. They are still part of the record, so they stay -
 // folded, counted, and one click away.
-function NoiseGroup({ fields, hits, record, canPin, onTogglePin, onMenu }) {
+function NoiseGroup({ fields, hits, record, canPin, onTogglePin, onMenu, onOpenLink }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="log-detail-group is-noise">
@@ -590,7 +584,7 @@ function NoiseGroup({ fields, hits, record, canPin, onTogglePin, onMenu }) {
         <FieldRow
           key={k} name={k} value={v} hits={hits} record={record}
           pinned={false} pinnable={canPin(k)}
-          onTogglePin={onTogglePin} onMenu={onMenu}
+          onTogglePin={onTogglePin} onMenu={onMenu} onOpenLink={onOpenLink}
         />
       ))}
     </div>
@@ -599,7 +593,7 @@ function NoiseGroup({ fields, hits, record, canPin, onTogglePin, onMenu }) {
 
 // One field row, shared by the pinned block and the grouped list so a field
 // looks and behaves the same wherever it currently sits.
-function FieldRow({ name, value, hits, record, isMsg, pinned, pinnable, onTogglePin, onMenu }) {
+function FieldRow({ name, value, hits, record, isMsg, pinned, pinnable, onTogglePin, onMenu, onOpenLink }) {
   const link = isMsg ? null : linkFor(name, value, record)
   // Any of the four spellings a stack trace arrives under. Matching one name
   // meant an Elastic agent's error.stack_trace rendered as a wrapped paragraph
@@ -618,7 +612,7 @@ function FieldRow({ name, value, hits, record, isMsg, pinned, pinnable, onToggle
         <span className={`log-detail-val mono${link ? ' is-link' : ''}`} data-log-field={name} data-log-value={value}>
           {highlightTerms(String(value ?? ''), hits)}
           {gloss && <span className="log-detail-gloss">{gloss}</span>}
-          {link && <LinkMarker link={link} />}
+          {link && <LinkMarker link={link} onOpen={onOpenLink} />}
         </span>
       )}
       <div className="log-field-actions">
@@ -816,7 +810,7 @@ function jsonLines(data) {
   return out
 }
 
-function JsonLine({ line, number, record, onKeyMenu }) {
+function JsonLine({ line, number, record, onKeyMenu, onOpenLink }) {
   const { kind, depth, name, path, value, comma } = line
   const keyBtn = name != null && (
     <button
@@ -849,7 +843,7 @@ function JsonLine({ line, number, record, onKeyMenu }) {
               {isNum ? String(value) : JSON.stringify(value ?? '')}
             </span>
             <span className="log-json-punc">{comma ? ',' : ''}</span>
-            {link && <LinkMarker link={link} />}
+            {link && <LinkMarker link={link} onOpen={onOpenLink} />}
           </>
         )}
       </span>
@@ -865,7 +859,7 @@ export function LogRecordDrawer({
   record, onClose, searchTerms,
   onAddChip, onDistribution, onCopy,
   index = 0, total = 0, onNavigate,
-  pinned = [], onTogglePin,
+  pinned = [], onTogglePin, onOpenLink,
   initialView = 'fields',
 }) {
   const [view, setView] = useState(initialView)
@@ -1052,7 +1046,7 @@ export function LogRecordDrawer({
                         {durationGloss(k, v) && (
                           <span className="log-detail-gloss">{durationGloss(k, v)}</span>
                         )}
-                        {link && <LinkMarker link={link} />}
+                        {link && <LinkMarker link={link} onOpen={onOpenLink} />}
                       </>
                     )}
                   </div>
@@ -1108,7 +1102,7 @@ export function LogRecordDrawer({
                   key={k} name={k} value={v} hits={hits} record={record}
                   isMsg={k === '_msg'}
                   pinned pinnable
-                  onTogglePin={onTogglePin} onMenu={openMenu}
+                  onTogglePin={onTogglePin} onMenu={openMenu} onOpenLink={onOpenLink}
                 />
               ))}
             </div>
@@ -1116,14 +1110,14 @@ export function LogRecordDrawer({
           {groups.map((group, gi) => (
             group.noise
               ? <NoiseGroup key={gi} fields={group.fields} hits={hits} record={record}
-                  canPin={canPin} onTogglePin={onTogglePin} onMenu={openMenu} />
+                  canPin={canPin} onTogglePin={onTogglePin} onMenu={openMenu} onOpenLink={onOpenLink} />
               : (
                 <div className="log-detail-group" key={gi}>
                   {group.fields.map(([k, v]) => (
                     <FieldRow
                       key={k} name={k} value={v} hits={hits} record={record}
                       pinned={false} pinnable={canPin(k)}
-                      onTogglePin={onTogglePin} onMenu={openMenu}
+                      onTogglePin={onTogglePin} onMenu={openMenu} onOpenLink={onOpenLink}
                     />
                   ))}
                 </div>
@@ -1134,7 +1128,7 @@ export function LogRecordDrawer({
         <div className="log-detail-body log-json-body">
           <div className="log-json">
             {jsonLines(json).map((line, i) => (
-              <JsonLine key={i} line={line} number={i + 1} record={record} onKeyMenu={openMenu} />
+              <JsonLine key={i} line={line} number={i + 1} record={record} onKeyMenu={openMenu} onOpenLink={onOpenLink} />
             ))}
           </div>
         </div>
@@ -1165,6 +1159,12 @@ export function LogRecordDrawer({
                     <button className="log-sel-item" title={link.hint}
                       onClick={() => run(() => onAddChip({ field: link.field, op: 'eq', value: link.value }))}>
                       <FilterIcon size={14} strokeWidth={2} />
+                      {link.label}
+                    </button>
+                  ) : onOpenLink ? (
+                    <button className="log-sel-item" title={link.hint}
+                      onClick={() => run(() => onOpenLink(link))}>
+                      <ArrowUpRight size={14} strokeWidth={2} />
                       {link.label}
                     </button>
                   ) : (
@@ -1227,11 +1227,12 @@ export function LogRecordDrawer({
   )
 }
 
-export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) {
+export default function LogsView({ goHome, timeRange, setTimeRange, setToast, onOpenLink, incomingChip, onIncomingChipApplied }) {
   const [filters, setFilters] = useState({})
   const [selectedId, setSelectedId] = useState(null)
   const [query, setQuery] = useState('')
   const [chips, setChips] = useState([])
+  const [runRequested, setRunRequested] = useState(false)
   const [recents, setRecents] = useState([
     [{ field: 'service', op: 'eq', value: 'payment' }, { field: 'log.level', op: 'eq', value: 'error' }],
     [{ field: 'http.status', op: 'prefix', value: '5' }],
@@ -1320,6 +1321,12 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
         setQueryState({ status: 'error', error: err?.message || 'Could not run this query. Check the connection and try again.' })
       })
   }, [effectiveChips, pipes])
+
+  useEffect(() => {
+    if (!runRequested) return
+    setRunRequested(false)
+    runQuery()
+  }, [runRequested, runQuery])
 
   const isRunning = queryState.status === 'running'
 
@@ -1606,6 +1613,28 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
   const addChipToQuery = useCallback((chip) => {
     setChips(prev => prev.length === 0 ? [chip] : [...prev, { connector: 'AND', ...chip }])
   }, [setChips])
+
+  // A filter handed in from another page - the trace view's "check logs".
+  //
+  // It replaces the query rather than appending, because arriving with someone
+  // else's filters still applied is not what the button promised; and it runs
+  // itself, because a filter that lands in the bar unapplied looks like the
+  // button did nothing.
+  //
+  // A trace id is matched across every spelling: one instance can hold trace_id
+  // and trace.id at once, and asking for either alone silently drops the rest
+  // of the trace's logs.
+  useEffect(() => {
+    if (!incomingChip) return
+    const spellings = ALIASES[incomingChip.concept] ?? [incomingChip.field]
+    const leaves = spellings.map((field, i) => ({
+      field, op: 'eq', value: incomingChip.value,
+      ...(i > 0 ? { connector: 'OR' } : {}),
+    }))
+    setChips(leaves.length > 1 ? [newGroup(leaves)] : leaves)
+    setRunRequested(true)
+    onIncomingChipApplied?.()
+  }, [incomingChip])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Shared by every copy action in the record drawer, so all of them report
   // through the same toast the query bar already uses.
@@ -2330,6 +2359,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast }) 
           onClose={() => setSelectedId(null)}
           searchTerms={searchTerms}
           onAddChip={addChipToQuery}
+          onOpenLink={onOpenLink}
           onDistribution={(field, x, y) => setDistField({ field, x, y })}
           onCopy={copyText}
           index={selectedIndex}
