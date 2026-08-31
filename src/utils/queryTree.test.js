@@ -6,6 +6,7 @@ import {
   isGroup, newGroup, getAt, flattenLeaves, lastLeafPath, normalize,
   replaceAt, removeAt, appendInto, wrapWithNeighbour, unwrapAt,
   toggleConnectorAt, isAtOrUnder, hasTopLevelOr, concatWithAnd,
+  facetStates, setFacetFilter, facetFilterFor, clearFacets,
 } from './queryTree.js'
 
 const leaf = (field, value, connector) => (
@@ -226,4 +227,117 @@ test('concatWithAnd with an empty side returns the other, without a leading conn
   assert.deepEqual(concatWithAnd([], incoming), incoming)
   assert.deepEqual(concatWithAnd(incoming, []), incoming)
   assert.equal(concatWithAnd([], incoming)[0].connector, undefined)
+})
+
+// ---------- Facet filters (the filters panel, expressed as chips) ----------
+
+const ne = (field, value, connector) => (
+  connector ? { field, op: 'neq', value, connector } : { field, op: 'neq', value }
+)
+
+const LEVELS = ['error', 'warn', 'info']
+const sel = (...v) => new Set(v)
+
+// The panel never calls the setter directly; it decides a selection and lets
+// facetFilterFor pick the shape. These helpers mirror that pairing so the tests
+// exercise the same path the UI does.
+const setSel = (nodes, field, selected, all, prefer) =>
+  setFacetFilter(nodes, field, facetFilterFor(selected, all, prefer))
+const readSel = (nodes, field, all) => {
+  const st = facetStates(nodes).get(field)
+  if (!st) return new Set(all)
+  return st.mode === 'include'
+    ? new Set(st.values)
+    : new Set(all.filter(v => !st.values.has(v)))
+}
+
+test('everything ticked is an empty tree — no chips means "*"', () => {
+  assert.deepEqual(setSel([], 'log.level', sel(...LEVELS), LEVELS), [])
+  assert.equal(facetStates([]).size, 0)
+})
+
+test('unticking one value excludes it', () => {
+  const out = setSel([], 'log.level', sel('warn', 'info'), LEVELS)
+  assert.deepEqual(out, [ne('log.level', 'error')])
+})
+
+// The whole reason exclusions cannot be an OR group: every record has exactly
+// one log.level, so `!=error OR !=warn` is true of all of them.
+test('several exclusions on one field join with AND, never OR', () => {
+  const out = setSel([], 'log.level', sel('info'), LEVELS)
+  assert.deepEqual(out, [newGroup([ne('log.level', 'error'), ne('log.level', 'warn', 'AND')])])
+})
+
+test('inclusions on one field join with OR', () => {
+  const out = setFacetFilter([], 'log.level', { mode: 'include', values: ['error', 'warn'] })
+  assert.deepEqual(out, [newGroup([leaf('log.level', 'error'), leaf('log.level', 'warn', 'OR')])])
+})
+
+test('different fields join with AND', () => {
+  let out = setSel([], 'log.level', sel('warn', 'info'), LEVELS)
+  out = setSel(out, 'service', sel('api'), ['api', 'auth'])
+  assert.deepEqual(out, [ne('log.level', 'error'), ne('service', 'auth')])
+})
+
+test('re-ticking the last unticked value clears the field entirely', () => {
+  let out = setSel([], 'log.level', sel('info'), LEVELS)
+  out = setSel(out, 'log.level', sel('warn', 'info'), LEVELS)
+  out = setSel(out, 'log.level', sel(...LEVELS), LEVELS)
+  assert.deepEqual(out, [])
+})
+
+// Datadog's own behaviour: `Only` writes an inclusion even though the same
+// selection is expressible as an exclusion, because that is what was meant.
+test('prefer decides the shape when both express the same selection', () => {
+  const one = sel('error')
+  assert.deepEqual(
+    setSel([], 'log.level', one, LEVELS, 'include'),
+    [leaf('log.level', 'error')])
+  assert.deepEqual(
+    setSel([], 'log.level', one, LEVELS, 'exclude'),
+    [newGroup([ne('log.level', 'warn'), ne('log.level', 'info', 'AND')])])
+})
+
+test('nothing ticked is expressible only as excluding everything', () => {
+  const out = setSel([], 'log.level', sel(), LEVELS, 'include')
+  assert.deepEqual(facetStates(out).get('log.level'), { mode: 'exclude', values: sel(...LEVELS) })
+  assert.deepEqual(readSel(out, 'log.level', LEVELS), sel())
+})
+
+test('facetStates reads both shapes back', () => {
+  let out = setSel([], 'log.level', sel('error'), LEVELS, 'include')
+  out = setSel(out, 'service', sel('api'), ['api', 'auth'], 'exclude')
+  const st = facetStates(out)
+  assert.deepEqual(st.get('log.level'), { mode: 'include', values: sel('error') })
+  assert.deepEqual(st.get('service'), { mode: 'exclude', values: sel('auth') })
+  assert.deepEqual(readSel(out, 'log.level', LEVELS), sel('error'))
+})
+
+test('hand-built filters are left alone', () => {
+  const hand = { field: 'path', op: 'contains', value: 'pay' }
+  assert.equal(facetStates([hand]).size, 0)
+  const out = setSel([hand], 'log.level', sel('warn', 'info'), LEVELS)
+  assert.deepEqual(out, [hand, ne('log.level', 'error')])
+  assert.deepEqual(clearFacets(out), [hand])
+})
+
+// An OR of exclusions is not a shape the panel can produce, so reading it as
+// one would let a hand-written filter be silently rewritten by a tick.
+test('an OR of exclusions is not a facet', () => {
+  const or = [newGroup([ne('log.level', 'error'), ne('log.level', 'warn', 'OR')])]
+  assert.equal(facetStates(or).size, 0)
+  assert.deepEqual(clearFacets(or), or)
+})
+
+test('an AND of inclusions on one field is not a facet either', () => {
+  const and = [newGroup([leaf('service', 'api'), leaf('service', 'auth', 'AND')])]
+  assert.equal(facetStates(and).size, 0)
+})
+
+test('clearFacets re-ticks everything, keeping hand-built filters', () => {
+  const hand = { field: 'path', op: 'contains', value: 'pay' }
+  let out = [hand]
+  out = setSel(out, 'log.level', sel('info'), LEVELS)
+  out = setSel(out, 'service', sel('api'), ['api', 'auth'], 'include')
+  assert.deepEqual(clearFacets(out), [hand])
 })

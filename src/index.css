@@ -990,9 +990,10 @@ tbody tr:hover { background: var(--panel-2); }
   content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 2px; background: transparent;
 }
 .logs-filters-resize:hover::after, .logs-filters-resize:active::after { background: var(--brand); }
-.logs-filters-head { padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+.logs-filters-head { flex-shrink: 0; padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
 .logs-filters-clear { background: none; border: none; color: var(--brand); font-family: inherit; font-size: 10.5px; cursor: pointer; text-transform: none; letter-spacing: 0; }
 .logs-filters-clear:hover { color: var(--brand-active); }
+.logs-filters-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .facet-group { border-bottom: 1px solid var(--border-subtle); }
 .facet-group:last-child { border-bottom: none; }
 .facet-head { padding: 10px 14px; cursor: pointer; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -1006,7 +1007,6 @@ tbody tr:hover { background: var(--panel-2); }
 .facet-meta-hi { color: var(--brand); font-weight: 600; }
 /* 'link' variant: the count is a static label, not a control, so it reads in
    primary text rather than the brand-blue that would suggest it's clickable. */
-.facet-meta-count { color: var(--text-primary); font-weight: 600; }
 .facet-chev { width: 12px; height: 12px; color: var(--text-muted); transition: transform .12s; }
 .facet-chev.open { transform: rotate(180deg); }
 .facet-search { padding: 4px 12px 6px; }
@@ -1041,18 +1041,31 @@ tbody tr:hover { background: var(--panel-2); }
 .facet-clear-btn-meta:hover { color: var(--text-primary); }
 .facet-clear-btn-meta svg { width: 10px; height: 10px; flex-shrink: 0; }
 /* 'link' variant — own line beneath the meta row, appears only once something is selected. */
-.facet-sel-link {
-  display: inline-block; margin-top: 4px; padding: 0;
-  background: none; border: none; line-height: 1;
-  color: var(--brand); font-family: inherit; font-size: 10px; font-weight: 600;
-  cursor: pointer; transition: filter .12s;
-}
-.facet-sel-link:hover { filter: brightness(1.2); text-decoration: underline; }
-.facet-opt { display: flex; align-items: center; gap: 8px; padding: 4px 12px; cursor: pointer; font-size: 11px; }
+/* A facet row is two controls sharing one line: the checkbox toggles this one
+   value, the rest of the row narrows to it alone (or restores everything when
+   it is already alone). Neither half looks different from the other, so each
+   says what it does on hover — that label is the only thing separating a
+   checklist from a radio group. */
+.facet-opt { display: flex; align-items: center; font-size: 11px; }
 .facet-opt:hover { background: var(--panel-2); }
-.facet-opt input { accent-color: var(--brand); flex-shrink: 0; }
+.facet-opt-box { display: flex; align-items: center; padding: 4px 6px 4px 12px; cursor: pointer; flex-shrink: 0; }
+.facet-opt-box input { accent-color: var(--brand); display: block; cursor: pointer; }
+.facet-opt-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px 4px 2px; background: none; border: 0; cursor: pointer;
+  font: inherit; text-align: left; color: inherit;
+}
 .facet-opt-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
 .facet-opt-count { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+
+/* Both signifiers occupy the same slot and only one is ever shown, so the
+   count never shifts as the pointer crosses between the two halves. */
+.facet-opt-hint { flex-shrink: 0; font-size: 9.5px; letter-spacing: .02em; color: var(--text-muted); }
+.facet-opt-hint > span { display: none; }
+.facet-opt-main:hover .hint-act { display: inline; }
+.facet-opt-box:hover ~ .facet-opt-main .hint-act { display: none; }
+.facet-opt-box:hover ~ .facet-opt-main .hint-toggle { display: inline; }
+.facet-opt-main:hover .facet-opt-label { color: var(--text-primary); }
 
 .logs-main { position: relative; background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-lg); display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
 .logs-main-body { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
@@ -3092,9 +3105,13 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 @keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(-14px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
 /* ============ scrollbar ============ */
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: var(--border-panel); border-radius: 5px; }
+/* Deliberately hairline. At this width the bar is a position indicator rather
+   than a grab handle, so the thumb is given a stronger colour to stay visible
+   and Firefox is told `thin` — its narrowest supported setting. */
+::-webkit-scrollbar { width: 2px; height: 2px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
 ::-webkit-scrollbar-track { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
 /* ============ responsive ============ */
 @media (max-width: 1080px) {

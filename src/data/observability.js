@@ -1,4 +1,5 @@
 import { extraLogRecords } from './logRecordTypes'
+import { isNoiseField } from '@/utils/logFields'
 
 export const BASE_TIME = new Date()
 
@@ -103,18 +104,61 @@ function generateLogVolume(points = 60) {
 }
 export const logVolume = generateLogVolume(60)
 
-export const logFacets = {
-  'log.level': [
-    { value: 'error', count: logRows.filter(l => l.level === 'error').length },
-    { value: 'info', count: logRows.filter(l => l.level === 'info').length },
-    { value: 'warn', count: logRows.filter(l => l.level === 'warn').length },
-  ],
-  // Derived from the rows, not from LOG_SERVICES: span records carry their own
-  // service names and a k8s event carries none, so a fixed list would hide them.
-  service: [...new Set(logRows.map(l => l.service).filter(Boolean))]
-    .sort()
-    .map(d => ({ value: d, count: logRows.filter(l => l.service === d).length })),
+// Facets are derived from the rows rather than listed by hand, so a new tag
+// becomes filterable without anyone remembering to add it here.
+//
+// A field earns a facet only when picking one of its values would actually
+// narrow the result set, and only when its values can be listed at all:
+//   • more distinct values than this is a search box, not a checkbox list
+//   • a value too long to fit a row cannot be read in one
+//   • a single value present on every row filters nothing — but a single value
+//     present on only some rows does, which is why absence is counted too
+const FACET_MAX_DISTINCT = 40
+const FACET_MAX_VALUE_LEN = 60
+
+// Severity reads worst-first, matching how services are ordered elsewhere;
+// every other facet leads with its most common value.
+const FACET_VALUE_ORDER = { 'log.level': ['error', 'warn', 'info'] }
+
+function buildLogFacets(rows) {
+  const out = {}
+  // Keys come from every row, not just the first. Records arrive in several
+  // shapes now - a k8s event, a database span and a request log carry different
+  // tags - so sampling the newest row would hand the panel whichever shape
+  // happened to be on top.
+  //
+  // Agent boilerplate is left out: the SDK's resource block is identical on
+  // every row of its kind, so it makes a facet whose only value is already
+  // implied by the rows carrying it.
+  const keys = new Set()
+  for (const row of rows) for (const k of Object.keys(row.tags ?? {})) {
+    if (!isNoiseField(k)) keys.add(k)
+  }
+  for (const key of keys) {
+    const counts = new Map()
+    let populated = 0
+    for (const row of rows) {
+      const raw = key === 'log.level' ? row.level : key === 'service' ? row.service : row.tags[key]
+      if (raw == null || raw === '') continue
+      populated++
+      const v = String(raw)
+      counts.set(v, (counts.get(v) || 0) + 1)
+    }
+    if (counts.size === 0 || counts.size > FACET_MAX_DISTINCT) continue
+    if ([...counts.keys()].some(v => v.length > FACET_MAX_VALUE_LEN)) continue
+    if (counts.size === 1 && populated === rows.length) continue
+
+    const fixed = FACET_VALUE_ORDER[key]
+    out[key] = [...counts.entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => fixed
+        ? fixed.indexOf(a.value) - fixed.indexOf(b.value)
+        : b.count - a.count || a.value.localeCompare(b.value))
+  }
+  return out
 }
+
+export const logFacets = buildLogFacets(logRows)
 
 export const logTotals = {
   total: logVolume.reduce((a, b) => a + b.total, 0),
