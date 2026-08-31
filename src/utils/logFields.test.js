@@ -208,3 +208,17 @@ test('nanosecond durations get a readable gloss, milliseconds do not', () => {
   assert.equal(durationGloss('duration_ms', '1840'), null)
   assert.equal(durationGloss('db.statement', 'select 1'), null)
 })
+
+test('an endpoint links into its service, and filters when APM does not know it', () => {
+  const known = rec({ service: 'order-service', endpoint: 'GET /v1/order' })
+  const open = linkFor({ field: 'endpoint', value: 'GET /v1/order', record: known, knownServices: services })
+  assert.equal(open.kind, 'open')
+  assert.equal(open.subTab, 'detail')
+  assert.equal(open.serviceId, 'order-service')
+
+  const unknown = rec({ service: 'order', endpoint: 'GET /v1/order' })
+  assert.equal(linkFor({ field: 'endpoint', value: 'GET /v1/order', record: unknown, knownServices: services }).kind, 'filter')
+
+  const orphan = rec({ endpoint: 'GET /v1/order' })
+  assert.match(linkFor({ field: 'endpoint', value: 'GET /v1/order', record: orphan, knownServices: services }).hint, /No service on this record/)
+})

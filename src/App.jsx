@@ -63,6 +63,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState(null)
   const [serviceSubTab, setServiceSubTab] = useState('overview')
+  const [serviceEndpoint, setServiceEndpoint] = useState('')
   const [infraSource, setInfraSource] = useState('host')
   const [infraHost, setInfraHost] = useState(null)
   const [infraExpanded, setInfraExpanded] = useState({})
@@ -80,10 +81,22 @@ export default function App() {
   const openLink = useCallback((link) => {
     if (!link) return
     if (link.view === 'traces') return openTrace(link.traceId)
-    if (link.view === 'service') { setServiceId(link.serviceId); setServiceSubTab('overview'); setView('service'); return }
+    if (link.view === 'service') {
+      setServiceId(link.serviceId)
+      setServiceSubTab(link.subTab ?? 'overview')
+      setServiceEndpoint(link.endpoint ?? '')
+      setView('service')
+      return
+    }
     if (link.view === 'infra') {
       setInfraSource(link.source)
-      setInfraHost(link.resource ?? null)
+      // A record names its resource the way its agent spelled it, which is not
+      // always a host this source knows - a span's net.peer.name is the
+      // database endpoint, not the box the collector scrapes. Drill in when the
+      // name matches, and land on the source when it does not, rather than
+      // selecting a host that is not there.
+      const known = infraHosts.some(h => h.host === link.resource)
+      setInfraHost(known ? link.resource : null)
       setView('infra')
     }
   }, [openTrace])
@@ -254,6 +267,8 @@ export default function App() {
                 goHome={goHome}
                 serviceSubTab={serviceSubTab}
                 setServiceSubTab={setServiceSubTab}
+                serviceEndpoint={serviceEndpoint}
+                setServiceEndpoint={setServiceEndpoint}
                 settingsOpen={settingsOpen}
                 setSettingsOpen={setSettingsOpen}
                 settingsTab={settingsTab}

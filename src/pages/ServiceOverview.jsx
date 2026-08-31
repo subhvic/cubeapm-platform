@@ -126,6 +126,105 @@ function KpiCards({ svc }) {
   )
 }
 
+// Figures for an endpoint the RED list does not carry. Derived from the name so
+// the same endpoint always reads the same, rather than changing on every render.
+function syntheticEndpoint(name) {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0
+  const n = Math.abs(h)
+  const rpm = 12 + (n % 140)
+  const p90 = 60 + (n % 420)
+  return {
+    endpoint: name,
+    totalReq: `${((rpm * 60) / 1000).toFixed(1)}K`,
+    timeConsumedPct: 1 + (n % 20),
+    rpm,
+    p90,
+    avg: Math.round(p90 * 0.55),
+    errPct: Number(((n % 70) / 10).toFixed(1)),
+  }
+}
+
+// The endpoint view: the same four numbers as the service, narrowed to one
+// route. It exists because a log record knows its endpoint, and sending that
+// link to the service overview would drop the one thing the record told us.
+function EndpointTab({ svc, endpoint, setEndpoint }) {
+  // An endpoint arriving from a log record will often not be in the RED list -
+  // that list is what the service page happens to chart, not everything the
+  // service serves. Showing the picker's first row instead would quietly answer
+  // a different question from the one the link asked, so an unknown endpoint is
+  // added to the list and given figures of its own.
+  const eps = useMemo(() => (
+    endpoint && !redEndpoints.some(e => e.endpoint === endpoint)
+      ? [...redEndpoints, syntheticEndpoint(endpoint)]
+      : redEndpoints
+  ), [endpoint])
+  const ep = eps.find(e => e.endpoint === endpoint) ?? eps[0]
+  const latS = statusForLatency(ep.p90)
+  const errS = statusForErrorRate(ep.errPct)
+  const chipLabel = st => st === 'critical' ? '↑ Critical' : st === 'warning' ? '↑ Warning' : '✓ Normal'
+
+  const cards = [
+    { lbl: 'Requests / min', val: ep.rpm.toFixed(2), unit: '', status: 'healthy', series: paymentServiceSeries.rpm, color: '#3B82F6', threshold: `${ep.totalReq} requests in range`, tipUnit: ' rpm', formatVal: v => Math.round(v) },
+    { lbl: 'p90 Latency', val: ep.p90, unit: 'ms', status: latS, series: paymentServiceSeries.latencyP90, color: '#EF4444', threshold: 'Threshold 300ms', tipUnit: ' ms', formatVal: v => Math.round(v) },
+    { lbl: 'Avg Latency', val: ep.avg, unit: 'ms', status: latS, series: paymentServiceSeries.latencyAvg, color: '#F59E0B', threshold: 'Colored via the p90 threshold', tipUnit: ' ms', formatVal: v => Math.round(v) },
+    { lbl: 'Error %', val: ep.errPct, unit: '%', status: errS, series: paymentServiceSeries.errorRatePct, color: '#EF4444', threshold: 'Threshold 3%', tipUnit: '%', formatVal: v => v.toFixed(2) },
+  ]
+
+  // What one request of this endpoint sets off downstream. The playground calls
+  // this "hits per request", and it is the reason to open an endpoint at all.
+  const hits = dbEndpoints.slice(0, 3).map(d => ({ name: d.endpoint ?? d.query ?? 'call', count: 1 }))
+
+  return (
+    <>
+      <div className="ep-bar">
+        <label htmlFor="ep-select">Endpoint</label>
+        <select
+          id="ep-select"
+          value={ep.endpoint}
+          onChange={e => setEndpoint(e.target.value)}
+        >
+          {eps.map(e => <option key={e.endpoint} value={e.endpoint}>{e.endpoint}</option>)}
+        </select>
+        <span className="ep-bar-svc mono">{svc.name}</span>
+      </div>
+
+      <div className="kpi-grid">
+        {cards.map(c => (
+          <div key={c.lbl} className={`kpi-card ${c.status}`}>
+            <div className="kpi-card-head">
+              <span className="lbl">{c.lbl}</span>
+              <span className={`kpi-chip ${c.status}`}>{chipLabel(c.status)}</span>
+            </div>
+            <div className="val">{c.val}<span className="unit">{c.unit}</span></div>
+            <div className="kpi-spark">
+              <SparkChart series={c.series} color={c.color} unit={c.tipUnit} formatVal={c.formatVal} />
+            </div>
+            <div className="kpi-threshold">{c.threshold}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="two-col">
+        <LatencyDrilldown />
+        <div className="panel">
+          <div className="panel-head">Hits per request <span className="hint">what one call sets off downstream</span></div>
+          <table className="ep-hits">
+            <tbody>
+              {hits.map(h => (
+                <tr key={h.name}>
+                  <td className="mono">{h.name}</td>
+                  <td className="num mono">{h.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function LatencyDrilldown() {
   const layers = latencyDrilldown
   const total = layers.reduce((a, b) => a + b.ms, 0)
@@ -855,7 +954,7 @@ function FilterSelect({ label, value, options, onSelect }) {
   )
 }
 
-export default function ServiceOverview({ serviceId, goHome, serviceSubTab, setServiceSubTab, timeRange, setTimeRange, settingsOpen, setSettingsOpen }) {
+export default function ServiceOverview({ serviceId, goHome, serviceSubTab, setServiceSubTab, serviceEndpoint, setServiceEndpoint, timeRange, setTimeRange, settingsOpen, setSettingsOpen }) {
   const svc = services.find(s => s.id === serviceId) || services[0]
   const isCrit = svc.status === 'critical'
   const isWarn = svc.status === 'warning'
@@ -865,7 +964,10 @@ export default function ServiceOverview({ serviceId, goHome, serviceSubTab, setS
   const [filterHost, setFilterHost] = useState('ALL')
   const [filterVersion, setFilterVersion] = useState('ALL')
 
-  const subtabs = ['overview', 'red', 'external', 'db', 'errors', 'traces', 'runtime']
+  const endpoint = serviceEndpoint || redEndpoints[0].endpoint
+  const setEndpoint = setServiceEndpoint
+
+  const subtabs = ['overview', 'detail', 'red', 'external', 'db', 'errors', 'traces', 'runtime']
 
   let body
   if (serviceSubTab === 'overview') {
@@ -880,6 +982,8 @@ export default function ServiceOverview({ serviceId, goHome, serviceSubTab, setS
         </div>
       </>
     )
+  } else if (serviceSubTab === 'detail') {
+    body = <EndpointTab svc={svc} endpoint={endpoint} setEndpoint={setEndpoint} />
   } else if (serviceSubTab === 'red') {
     body = <RedTab />
   } else if (serviceSubTab === 'external') {

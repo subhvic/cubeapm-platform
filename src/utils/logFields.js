@@ -214,6 +214,20 @@ export function linkFor({ field, value, record, knownServices }) {
           hint: `No APM service named ${str} — filters the log stream instead` }
   }
 
+  // An endpoint only means something inside a service, so it links when APM
+  // knows the service and falls back to a filter when it does not - the record
+  // still knows its endpoint either way.
+  if (concept === 'endpoint') {
+    const service = valueOfConcept(record, 'service')
+    const known = service && knownServices instanceof Set && knownServices.has(String(service))
+    return known
+      ? { kind: 'open', view: 'service', serviceId: String(service), subTab: 'detail', endpoint: str,
+          label: 'Open this endpoint', hint: `Opens ${str} on ${service} in APM` }
+      : { kind: 'filter', field, value: str, label: `Filter to ${str}`,
+          hint: service ? `No APM service named ${service} - filters the log stream instead`
+                        : 'No service on this record - filters the log stream instead' }
+  }
+
   const infra = INFRA_TARGETS[concept]
   if (infra) {
     return { kind: 'open', view: 'infra', source: infra.source, resource: str,
