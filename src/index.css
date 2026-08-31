@@ -3395,3 +3395,7 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .ep-hits td { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); color: var(--text-primary); }
 .ep-hits tr:last-child td { border-bottom: none; }
 .ep-hits .num { text-align: right; color: var(--text-secondary); }
+
+/* A summary row that drills in says so on hover; one that does not, does not. */
+.appdb-summary-row.is-clickable { cursor: pointer; }
+.appdb-summary-row.is-clickable:hover { background: var(--panel-2); }

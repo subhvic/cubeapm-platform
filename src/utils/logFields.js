@@ -175,7 +175,11 @@ export function isStreamField(record, field) {
 const INFRA_TARGETS = {
   pod: { source: 'k8s-pod', label: 'pod' },
   node: { source: 'k8s-node', label: 'node' },
-  namespace: { source: 'k8s-deployment', label: 'namespace' },
+  // The namespace overview is the k8s-cluster tab scoped by section, not the
+  // deployment tab - that one lists deployments and merely accepts a namespace.
+  // Verified against the product: /infra?tab=k8s-cluster&section=<ns> renders a
+  // picker labelled Namespace with the pod and workload rollups.
+  namespace: { source: 'k8s-cluster', label: 'namespace' },
   cluster: { source: 'k8s-cluster', label: 'cluster' },
   host: { source: 'host', label: 'host' },
 }

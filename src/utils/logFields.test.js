@@ -222,3 +222,14 @@ test('an endpoint links into its service, and filters when APM does not know it'
   const orphan = rec({ endpoint: 'GET /v1/order' })
   assert.match(linkFor({ field: 'endpoint', value: 'GET /v1/order', record: orphan, knownServices: services }).hint, /No service on this record/)
 })
+
+test('a namespace opens the namespace overview, not the deployment list', () => {
+  const l = linkFor({ field: 'k8s.namespace.name', value: 'kube-system', record: rec({}), knownServices: services })
+  assert.equal(l.kind, 'open')
+  assert.equal(l.source, 'k8s-cluster')
+  assert.equal(l.resource, 'kube-system')
+  // Every k8s spelling reaches the same place.
+  for (const f of ['kube_namespace', 'orchestrator.namespace']) {
+    assert.equal(linkFor({ field: f, value: 'kube-system', record: rec({}), knownServices: services }).source, 'k8s-cluster')
+  }
+})

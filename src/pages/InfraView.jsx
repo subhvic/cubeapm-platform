@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import {
   INFRA_SOURCE_INDEX, infraHosts, HOST_PROCESSES,
-  k8sCpuAllocation, k8sMemAllocation, k8sContainersSeries, k8sClusterSummary, k8sNamespaceSummary, k8sDeploymentSummary,
+  k8sCpuAllocation, k8sMemAllocation, k8sContainersSeries, k8sClusterSummary, k8sNamespaceSummary, k8sDeploymentSummary, k8sNamespaceDetail,
   k8sNodes, k8sPods, K8S_NAMESPACES,
   mysqlSummary, mysqlSeries, redisSummary, redisSeries,
 } from '@/data/observability'
@@ -248,10 +248,16 @@ function HostDetail({ host }) {
 
 /* ============ Kubernetes: Cluster ============ */
 
-function K8sClusterView() {
-  const s = k8sClusterSummary
+// One view, two scopes. With a namespace it is the namespace overview that a
+// k8s.namespace.name link opens; without one it is the cluster. They share the
+// charts and the stat grid because they answer the same question at different
+// altitudes - the only real difference is that a node is not namespaced, so the
+// node counts drop out when a namespace is selected.
+function K8sClusterView({ namespace, setNamespace }) {
+  const detail = namespace ? k8sNamespaceDetail(namespace) : null
+  const s = detail ?? k8sClusterSummary
   const cards = [
-    ['Nodes Total', s.nodesTotal], ['Nodes Ready', s.nodesReady],
+    ...(detail ? [] : [['Nodes Total', s.nodesTotal], ['Nodes Ready', s.nodesReady]]),
     ['Pods Total', s.podsTotal], ['Pods Pending', s.podsPending], ['Pods Failed', s.podsFailed], ['Containers Ready', s.containersReady],
     ['DaemonSets Total', s.daemonSetsTotal], ['DaemonSets Unhealthy', s.daemonSetsUnhealthy],
     ['Deployments Total', s.deploymentsTotal], ['Deployments Unhealthy', s.deploymentsUnhealthy],
@@ -276,6 +282,17 @@ function K8sClusterView() {
 
   return (
     <>
+      {detail && (
+        <div className="infra-drill-head">
+          <button className="infra-back" onClick={() => setNamespace(null)} aria-label="Back to cluster">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+          </button>
+          <div className="k8s-selector">
+            <span className="k8s-selector-lbl">Namespace</span>
+            <span className="k8s-selector-val">{namespace}</span>
+          </div>
+        </div>
+      )}
       <div className="infra-row-charts">
         <div className="infra-chart-card">
           <div className="clbl">CPU Allocation (cores)</div>
@@ -353,24 +370,47 @@ function K8sClusterView() {
         })}
       </div>
 
-      <div className="panel">
-        <div className="panel-head">Summary <span className="hint">Resource usage by namespace</span></div>
-        <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 110px 110px 110px 120px 120px 120px 90px' }}>
-          <span>Namespace</span><span>CPU Used</span><span>CPU Request</span><span>CPU Limit</span><span>Memory Used</span><span>Memory Request</span><span>Memory Limit</span><span>Containers</span>
-        </div>
-        {k8sNamespaceSummary.map(n => (
-          <div key={n.namespace} className="appdb-summary-row" style={{ gridTemplateColumns: '1fr 110px 110px 110px 120px 120px 120px 90px' }}>
-            <span className="host-cell mono">{n.namespace}</span>
-            <span className="num-cell">{n.cpuUsed}</span>
-            <span className="num-cell">{n.cpuRequest}</span>
-            <span className="num-cell">{n.cpuLimit ?? '-'}</span>
-            <span className="num-cell">{fmtBytes(n.memUsed)}</span>
-            <span className="num-cell">{fmtBytes(n.memRequest)}</span>
-            <span className="num-cell">{fmtBytes(n.memLimit)}</span>
-            <span className="num-cell">{n.containers}</span>
+      {detail ? (
+        <div className="panel">
+          <div className="panel-head">Pods <span className="hint">{detail.podsTotal} in {namespace}</span></div>
+          <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 160px 110px 130px 110px' }}>
+            <span>Pod</span><span style={{ textAlign: 'left' }}>Node</span><span>CPU Used</span><span>Memory Used</span><span>Memory Limit</span>
           </div>
-        ))}
-      </div>
+          {detail.pods.map(pod => (
+            <div key={pod.name} className="appdb-summary-row" style={{ gridTemplateColumns: '1fr 160px 110px 130px 110px' }}>
+              <span className="host-cell mono">{pod.name}</span>
+              <span className="host-cell mono" style={{ textAlign: 'left' }}>{pod.node}</span>
+              <span className="num-cell">{pod.cpuUsed}</span>
+              <span className="num-cell">{fmtBytes(pod.memUsed)}</span>
+              <span className="num-cell">{pod.memLimit ? fmtBytes(pod.memLimit) : '-'}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="panel">
+          <div className="panel-head">Summary <span className="hint">Resource usage by namespace &middot; click a row to scope</span></div>
+          <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 110px 110px 110px 120px 120px 120px 90px' }}>
+            <span>Namespace</span><span>CPU Used</span><span>CPU Request</span><span>CPU Limit</span><span>Memory Used</span><span>Memory Request</span><span>Memory Limit</span><span>Containers</span>
+          </div>
+          {k8sNamespaceSummary.map(n => (
+            <div
+              key={n.namespace}
+              className="appdb-summary-row is-clickable"
+              style={{ gridTemplateColumns: '1fr 110px 110px 110px 120px 120px 120px 90px' }}
+              onClick={() => setNamespace(n.namespace)}
+            >
+              <span className="host-cell mono">{n.namespace}</span>
+              <span className="num-cell">{n.cpuUsed}</span>
+              <span className="num-cell">{n.cpuRequest}</span>
+              <span className="num-cell">{n.cpuLimit ?? '-'}</span>
+              <span className="num-cell">{fmtBytes(n.memUsed)}</span>
+              <span className="num-cell">{fmtBytes(n.memRequest)}</span>
+              <span className="num-cell">{fmtBytes(n.memLimit)}</span>
+              <span className="num-cell">{n.containers}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="k8s-events">
         <div className="k8s-events-head">Events</div>
@@ -795,10 +835,14 @@ function CrumbSelect({ value, options, onSelect, searchPlaceholder = 'Search…'
   )
 }
 
-export default function InfraView({ goHome, source, selectedHost, setSelectedHost, timeRange, setTimeRange, settingsOpen, setSettingsOpen }) {
+export default function InfraView({ goHome, source, resource, selectedHost, setSelectedHost, timeRange, setTimeRange, settingsOpen, setSettingsOpen }) {
   const PALETTE = ['#3B82F6', '#A78BFA', '#F472B6', '#34D399', '#F59E0B', '#60A5FA', '#EC4899']
-  const [k8sNode, setK8sNode] = useState(null)
-  const [k8sPod, setK8sPod] = useState(null)
+  // Seeded from the incoming link, so /infra?tab=k8s-cluster&section=kube-system
+  // arrives already scoped. App remounts on a resource change, so this only has
+  // to be right at mount.
+  const [k8sNode, setK8sNode] = useState(() => (source === 'k8s-node' ? resource ?? null : null))
+  const [k8sNamespace, setK8sNamespace] = useState(() => (source === 'k8s-cluster' ? resource ?? null : null))
+  const [k8sPod, setK8sPod] = useState(() => (source === 'k8s-pod' ? resource ?? null : null))
 
   const host = selectedHost ? infraHosts.find(h => h.host === selectedHost) : null
   const meta = INFRA_SOURCE_INDEX[source]
@@ -872,7 +916,7 @@ export default function InfraView({ goHome, source, selectedHost, setSelectedHos
   } else if (source === 'redis') {
     body = <RedisView />
   } else if (source === 'k8s-cluster') {
-    body = <K8sClusterView />
+    body = <K8sClusterView namespace={k8sNamespace} setNamespace={setK8sNamespace} />
   } else if (source === 'k8s-node') {
     body = <K8sNodeView selectedNode={k8sNode} setSelectedNode={setK8sNode} selectedPod={k8sPod} setSelectedPod={setK8sPod} />
   } else if (source === 'k8s-pod') {

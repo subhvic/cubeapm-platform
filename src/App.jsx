@@ -66,6 +66,8 @@ export default function App() {
   const [serviceEndpoint, setServiceEndpoint] = useState('')
   const [infraSource, setInfraSource] = useState('host')
   const [infraHost, setInfraHost] = useState(null)
+  // What a link asked for, whatever kind of resource that source drills into.
+  const [infraResource, setInfraResource] = useState(null)
   const [infraExpanded, setInfraExpanded] = useState({})
   const [hiddenNavItems, setHiddenNavItems] = useState(() => new Set())
 
@@ -97,6 +99,7 @@ export default function App() {
       // selecting a host that is not there.
       const known = infraHosts.some(h => h.host === link.resource)
       setInfraHost(known ? link.resource : null)
+      setInfraResource(link.resource ?? null)
       setView('infra')
     }
   }, [openTrace])
@@ -232,7 +235,7 @@ export default function App() {
                             <div
                               key={c.id}
                               className={`svc-sidebar-item svc-sidebar-child${infraSource === c.id ? ' active' : ''}`}
-                              onClick={() => { setInfraSource(c.id); setInfraHost(null) }}
+                              onClick={() => { setInfraSource(c.id); setInfraHost(null); setInfraResource(null) }}
                             >
                               <span className="svc-sidebar-name">{c.label}</span>
                             </div>
@@ -249,7 +252,7 @@ export default function App() {
                   <div
                     key={s.id}
                     className={`svc-sidebar-item${isActive ? ' active' : ''}${s.enabled ? '' : ' disabled'}`}
-                    onClick={s.enabled ? () => { setInfraSource(s.id); setInfraHost(null) } : undefined}
+                    onClick={s.enabled ? () => { setInfraSource(s.id); setInfraHost(null); setInfraResource(null) } : undefined}
                     title={s.enabled ? s.label : `${s.label} - no data connected yet`}
                   >
                     <InfraIcon id={s.id} />
@@ -296,9 +299,10 @@ export default function App() {
               />
             ) : isInfra ? (
               <InfraView
-                key={infraSource}
+                key={`${infraSource}:${infraResource ?? ''}`}
                 goHome={goHome}
                 source={infraSource}
+                resource={infraResource}
                 selectedHost={infraHost}
                 setSelectedHost={setInfraHost}
                 timeRange={timeRange}

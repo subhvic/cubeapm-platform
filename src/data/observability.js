@@ -290,6 +290,43 @@ export const k8sPods = K8S_POD_ROWS.map((p, i) => ({
 
 export const K8S_NAMESPACES = ['default', 'kube-system']
 
+/**
+ * The namespace rollup behind /infra?tab=k8s-cluster&section=<namespace>.
+ *
+ * Derived from the pods and the per-namespace allocation rather than stored, so
+ * it cannot drift from the pod list the drill-down shows. Node counts are
+ * deliberately absent: a node is not namespaced, which is the one real
+ * difference between this view and the cluster it sits inside.
+ */
+export function k8sNamespaceDetail(namespace) {
+  const alloc = k8sNamespaceSummary.find(n => n.namespace === namespace)
+  if (!alloc) return null
+  const pods = k8sPods.filter(p => p.namespace === namespace)
+  const deploy = k8sDeploymentSummary.find(d => d.namespace === namespace)
+  const isSystem = namespace === 'kube-system'
+  return {
+    namespace,
+    alloc,
+    pods,
+    podsTotal: pods.length,
+    podsPending: 0,
+    podsFailed: 0,
+    containersReady: alloc.containers,
+    containersTotal: alloc.containers,
+    daemonSetsTotal: isSystem ? 2 : 0,
+    daemonSetsUnhealthy: 0,
+    deploymentsTotal: deploy?.deployments ?? 0,
+    deploymentsUnhealthy: 0,
+    hpasTotal: 0,
+    statefulSetsTotal: isSystem ? 0 : 1,
+    statefulSetsUnhealthy: 0,
+    replicaSetsTotal: deploy?.deployments ?? 0,
+    replicaSetsUnhealthy: 0,
+    replControllersTotal: 0,
+    replControllersUnhealthy: 0,
+  }
+}
+
 /* ============ MYSQL ============ */
 
 export const mysqlSummary = {
