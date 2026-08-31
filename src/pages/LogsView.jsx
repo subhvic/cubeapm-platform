@@ -20,7 +20,7 @@ import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRigh
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
-  recordType, recordTitle, TYPE_LABELS, durationGloss, conceptOf, ALIASES,
+  recordType, recordTitle, TYPE_LABELS, durationGloss, conceptOf, ALIASES, isNoiseField,
 } from '@/utils/logFields'
 
 const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
@@ -162,19 +162,15 @@ function FacetGroup({ title, options, selected, onToggle, toggleVariant = 'chip'
 }
 
 // Every tag a record carries can be turned into a column, so the Fields
-// dropdown lists all of them rather than an arbitrary subset.
-const EXTRA_FIELDS = [
-  { key: 'duration_ms', label: 'duration_ms' },
-  { key: 'endpoint', label: 'endpoint' },
-  { key: 'env', label: 'env' },
-  { key: 'http.status', label: 'http.status' },
-  { key: 'log.exception.type', label: 'log.exception.type' },
-  { key: 'log.level', label: 'log.level' },
-  { key: 'log.stacktrace', label: 'log.stacktrace' },
-  { key: 'path', label: 'path' },
-  { key: 'service', label: 'service' },
-  { key: 'trace_id', label: 'trace_id' },
-]
+// dropdown lists all of them rather than an arbitrary subset. Derived from the
+// rows rather than written out: the list was a hand-kept copy, and it silently
+// stopped covering the data the moment records of another shape arrived.
+// Agent boilerplate is left out - it is on every row of its kind and identical
+// every time, so it makes a column that says nothing.
+const EXTRA_FIELDS = [...new Set(logRows.flatMap(r => Object.keys(r.tags)))]
+  .filter(k => !isNoiseField(k))
+  .sort()
+  .map(key => ({ key, label: key }))
 
 const DEFAULT_FIELDS = new Set()
 
