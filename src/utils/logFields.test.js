@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ALIASES, conceptOf, resolveField, valueOfConcept, isNoiseField,
-  recordType, highlightFields, recordTitle, isStreamField, linkFor,
+  recordType, highlightFields, recordTitle, isStreamField, linkFor, fieldGroupsFor, durationGloss,
 } from './logFields.js'
 import { logRows } from '@/data/observability'
 
@@ -166,4 +166,45 @@ test('every seeded record resolves a severity and a timestamp', () => {
     assert.ok(valueOfConcept(r, 'severity') || r.level, `no severity on ${r.id}`)
     assert.ok(r.time instanceof Date, `no time on ${r.id}`)
   }
+})
+
+// ---------- Grouping ----------
+
+test('a database call groups the call first and the resource block last', () => {
+  const r = logRows.find(x => recordType(x) === 'db-span')
+  const groups = fieldGroupsFor(r)
+  assert.equal(groups[0].fields[0][0], 'db.system')
+  assert.equal(groups.at(-1).noise, true)
+  assert.ok(groups.at(-1).fields.every(([k]) => k.startsWith('_resource.')))
+})
+
+test('a k8s event leads with what happened, not with metadata', () => {
+  const r = logRows.find(x => recordType(x) === 'k8s-event')
+  const groups = fieldGroupsFor(r)
+  assert.deepEqual(groups[0].fields.map(([k]) => k), ['object.type', 'object.reason', 'object.note'])
+  assert.ok(groups.at(-1).fields.some(([k]) => k === 'object.metadata.managedFields'))
+})
+
+test('every field lands in exactly one group', () => {
+  for (const r of logRows) {
+    const seen = fieldGroupsFor(r).flatMap(g => g.fields.map(([k]) => k))
+    assert.equal(new Set(seen).size, seen.length, `duplicate field in ${r.id}`)
+    assert.deepEqual(new Set(seen), new Set(Object.keys(r.tags)), `dropped a field on ${r.id}`)
+  }
+})
+
+test('hidden fields are dropped rather than grouped', () => {
+  const r = { message: '', tags: { 'log.stacktrace': '', service: 'order' } }
+  const groups = fieldGroupsFor(r, { isHidden: (k, v) => v === '' })
+  assert.deepEqual(groups.flatMap(g => g.fields.map(([k]) => k)), ['service'])
+})
+
+// ---------- Units ----------
+
+test('nanosecond durations get a readable gloss, milliseconds do not', () => {
+  assert.equal(durationGloss('duration', '3000000'), '3 ms')
+  assert.equal(durationGloss('duration', '1840000000'), '1.84 s')
+  assert.equal(durationGloss('event.duration', '450000'), '450 µs')
+  assert.equal(durationGloss('duration_ms', '1840'), null)
+  assert.equal(durationGloss('db.statement', 'select 1'), null)
 })

@@ -1865,8 +1865,15 @@ tbody tr:hover { background: var(--panel-2); }
 .log-detail-body { flex: 1; overflow-y: auto; padding: 4px 0 10px; }
 .log-detail-key { font-size: 10.5px; color: var(--text-muted); letter-spacing: .2px; font-weight: 600; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
 .log-detail-val { font-size: 12px; color: var(--text-primary); line-height: 1.5; word-break: break-word; }
-.log-detail-field { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding: 7px 16px; align-items: start; font-size: 11px; border-bottom: 1px solid var(--border-subtle); }
-.log-detail-field .log-detail-key { margin-bottom: 0; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; padding-top: 1px; }
+.log-detail-field { display: grid; grid-template-columns: minmax(0, 168px) 1fr; gap: 12px; padding: 7px 16px; align-items: start; font-size: 11px; border-bottom: 1px solid var(--border-subtle); }
+/* Field names wrap rather than run under the value. Dotted names on a k8s
+   event or an OTel resource are far longer than an app log's, and a fixed
+   column that fits `service` silently overlaps `object.regarding.namespace`. */
+.log-detail-field .log-detail-key {
+  margin-bottom: 0; font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px; padding-top: 1px;
+  min-width: 0; overflow-wrap: anywhere; line-height: 1.45;
+}
 /* The values are the record. They were dimmer and smaller than the labels
    naming them, and truncated on top of that — a trace id or a stack trace was
    unreadable without opening the JSON view. */
@@ -1901,7 +1908,7 @@ tbody tr:hover { background: var(--panel-2); }
 /* ── Per-field action trigger ── */
 /* Reserved by the grid rather than revealed by display:none, so rows do not
    reflow on hover and the button stays reachable by keyboard. */
-.log-detail-field { grid-template-columns: 140px 1fr auto; }
+.log-detail-field { grid-template-columns: minmax(0, 168px) 1fr auto; }
 .log-detail-group:last-child .log-detail-field:last-child { border-bottom: none; }
 
 /* ── Pending-link affordance ── */
@@ -1924,6 +1931,54 @@ tbody tr:hover { background: var(--panel-2); }
 .log-detail-field:hover .log-link-hint,
 .log-json-line:hover .log-link-hint { opacity: 1; }
 .log-json-line .log-link-hint { margin-left: 6px; color: var(--brand-on-muted); }
+
+/* A filter marker is deliberately quieter than an open marker: one leaves the
+   page, the other narrows it, and the difference is worth seeing before the
+   click rather than after. */
+.log-link-hint.is-filter { color: var(--text-muted); }
+
+/* The raw value is what you would copy or filter on, so it stays exactly as
+   stored. This says what it means in a unit a person reads. */
+.log-detail-gloss {
+  margin-left: 7px; color: var(--text-muted);
+  font-family: 'Rubik', sans-serif; font-size: 11px;
+}
+.log-detail-field:hover .log-link-hint.is-filter,
+.log-hl-card:hover .log-link-hint.is-filter { color: var(--text-secondary); }
+
+/* What kind of record this is, said once next to the severity. Set quiet: it
+   labels the panel rather than competing with the record's own content. */
+.log-detail-shape {
+  font-size: 11px; color: var(--text-muted);
+  letter-spacing: .02em; white-space: nowrap;
+}
+.log-detail-built-title {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; font-weight: 500; color: var(--text-primary);
+}
+.log-detail-built-title::before {
+  content: ''; display: inline-block;
+  width: 1px; height: 10px; margin-right: 8px; vertical-align: -1px;
+  background: var(--border-panel);
+}
+
+/* ── Folded agent fields ── */
+.log-noise-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 7px 14px; background: none; border: none; cursor: pointer;
+  color: var(--text-muted); text-align: left;
+  font-family: 'Rubik', sans-serif; font-size: 11.5px;
+  transition: color .12s;
+}
+.log-noise-toggle:hover { color: var(--text-secondary); }
+.log-noise-toggle svg {
+  width: 12px; height: 12px; flex-shrink: 0;
+  transition: transform .15s;
+}
+.log-noise-toggle svg.is-open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .log-noise-toggle svg { transition: none; }
+}
 
 /* ── Field search ── */
 .log-detail-search {

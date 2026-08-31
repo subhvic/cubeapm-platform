@@ -241,3 +241,93 @@ export function linkFor({ field, value, record, knownServices }) {
 
   return null
 }
+
+// Groups are written as concept names where a concept exists and literal field
+// names where one does not. A concept expands to every spelling it knows, and
+// absent spellings drop out, so one group definition serves every agent.
+const TYPE_GROUPS = {
+  'k8s-event': [
+    ['object.type', 'object.reason', 'object.note'],
+    ['object.regarding.kind', 'object.regarding.name', 'object.regarding.namespace',
+      'namespace', 'node', 'object.reportingController', 'object.deprecatedSource.component',
+      'object.deprecatedSource.host', 'event.name', 'k8s.resource.name'],
+  ],
+  'db-span': [
+    ['dbSystem', 'dbOperation', 'dbStatement', 'dbTable', 'dbName', 'db.user'],
+    ['peerHost', 'peerPort', 'duration', 'service', 'spanId', 'traceId', 'endpoint', 'host'],
+  ],
+  exception: [
+    ['exceptionType', 'exceptionMessage', 'stacktrace'],
+    ['env', 'severity', 'service', 'endpoint', 'traceId', 'spanId', 'logger', 'thread', 'host'],
+  ],
+  request: [
+    ['exceptionType', 'stacktrace'],
+    ['env', 'severity', 'service', 'endpoint', 'traceId', 'path', 'httpStatus', 'duration'],
+  ],
+  'k8s-log': [
+    ['pod', 'container', 'namespace', 'node', 'cluster'],
+    ['env', 'severity', 'host', 'log.file.path', 'log.iostream',
+      'k8s.pod.uid', 'k8s.container.restart_count', 'k8s.pod.start_time'],
+  ],
+  record: [
+    ['env', 'severity', 'service', 'host', 'traceId', 'spanId'],
+  ],
+}
+
+const expand = (token) => ALIASES[token] ?? [token]
+
+/**
+ * The record's fields, grouped by the question they answer, with everything
+ * unnamed following in a group of its own so a new field shows up without a
+ * code change here. Noise trails at the end, flagged, for the caller to fold
+ * away — it is part of the record, just never the reason anyone opened it.
+ */
+export function fieldGroupsFor(record, { isHidden = () => false } = {}) {
+  const tags = tagsOf(record)
+  const spec = TYPE_GROUPS[recordType(record)] ?? TYPE_GROUPS.record
+  const taken = new Set()
+  const groups = []
+
+  for (const tokens of spec) {
+    const rows = []
+    for (const token of tokens) {
+      for (const field of expand(token)) {
+        if (taken.has(field) || !(field in tags)) continue
+        taken.add(field)
+        if (!isHidden(field, tags[field])) rows.push([field, tags[field]])
+      }
+    }
+    if (rows.length) groups.push({ fields: rows, noise: false })
+  }
+
+  const rest = []
+  const noise = []
+  for (const [field, value] of Object.entries(tags)) {
+    if (taken.has(field) || isHidden(field, value)) continue
+    ;(isNoiseField(field) ? noise : rest).push([field, value])
+  }
+  if (rest.length) groups.push({ fields: rest, noise: false })
+  if (noise.length) groups.push({ fields: noise, noise: true })
+  return groups
+}
+
+// Duration is the field most likely to be read wrong. OTel spans record
+// nanoseconds, Datadog asks you to rescale into nanoseconds, ECS event.duration
+// is nanoseconds, and an agent's own duration_ms is milliseconds - so the same
+// number means a thousandfold different thing depending on the spelling.
+// The raw value stays; this is the gloss beside it.
+const NANOSECOND_FIELDS = new Set(['duration', 'event.duration'])
+
+export function durationGloss(field, value) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) return null
+  if (NANOSECOND_FIELDS.has(field)) return msLabel(n / 1e6)
+  if (field === 'duration_ms') return null   // already legible in its own unit
+  return null
+}
+
+function msLabel(ms) {
+  if (ms < 1) return `${Math.round(ms * 1000)} µs`
+  if (ms < 1000) return `${ms < 10 ? ms.toFixed(2).replace(/\.?0+$/, '') : Math.round(ms)} ms`
+  return `${(ms / 1000).toFixed(2).replace(/\.?0+$/, '')} s`
+}

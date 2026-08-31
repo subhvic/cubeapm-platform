@@ -16,7 +16,12 @@ import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon } from 'lucide-react'
+import { services } from '@/data/services'
+import {
+  linkFor as resolveLink, highlightFields, fieldGroupsFor,
+  recordType, recordTitle, TYPE_LABELS, durationGloss, conceptOf,
+} from '@/utils/logFields'
 
 const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
 const AGG_NUMERIC_FIELDS = new Set(FIELD_CATALOG.filter(f => f.type === 'keyword').map(f => f.field))
@@ -502,29 +507,26 @@ function AlertDrawer({ filters, query, onClose }) {
 //
 // Deliberately inert for now: a marker that reads as a live link and does
 // nothing is worse than no marker at all.
-const FIELD_LINKS = {
-  service: {
-    label: (v) => `Open ${v} in APM`,
-    hint: (v) => `Opens the ${v} service page in APM — not connected yet`,
-  },
-  trace_id: {
-    label: () => 'Open this trace',
-    hint: (v) => `Opens trace ${String(v).slice(0, 8)}… in Traces — not connected yet`,
-  },
-}
+// A log's service is not always an APM service: on a real instance log rows
+// carry `search` while APM knows `search-service`. Linking anyway produces a
+// page that loads, shows nothing, and blames the user, so the link resolver is
+// told which names actually exist.
+const KNOWN_SERVICES = new Set(services.map(s => s.id))
 
-function linkFor(field, value) {
-  const link = FIELD_LINKS[field]
-  if (!link || value == null || value === '') return null
-  return { label: link.label(value), hint: link.hint(value) }
+function linkFor(field, value, record) {
+  return resolveLink({ field, value, record, knownServices: KNOWN_SERVICES })
 }
 
 // Marks a value as a doorway. Not a button: there is nothing to press yet, and
 // a control that swallows clicks teaches people the feature is broken.
-function LinkMarker({ hint }) {
+function LinkMarker({ link }) {
+  const filter = link.kind === 'filter'
   return (
-    <span className="log-link-hint" role="img" aria-label={hint} title={hint}>
-      <ArrowUpRight size={11} strokeWidth={2.25} />
+    <span className={`log-link-hint${filter ? ' is-filter' : ''}`}
+      role="img" aria-label={link.hint} title={link.hint}>
+      {filter
+        ? <FilterIcon size={10} strokeWidth={2.25} />
+        : <ArrowUpRight size={11} strokeWidth={2.25} />}
     </span>
   )
 }
@@ -538,19 +540,9 @@ function LinkMarker({ hint }) {
 // The three fields that answer "what is this record about" — pulled to the top
 // as cards, above the message, because they are what you look for first and
 // what you carry to the next screen.
-const HIGHLIGHT_FIELDS = ['service', 'endpoint', 'trace_id']
-
-// The failure leads, because on an error record it is the reason the record was
-// opened. On every other record the group is empty and drops out, so the routine
-// fields come first anyway — one ordering serves both.
-const FIELD_GROUPS = [
-  ['log.exception.type', 'log.stacktrace'],
-  ['env', 'log.level', 'service', 'endpoint', 'trace_id', 'path', 'http.status', 'duration_ms'],
-]
-
 // These exist only on error records. Elsewhere the rows are labels for things
 // that are not there, which reads as missing data rather than as "this log did
-// not throw" — and since they are a whole group, an info record would otherwise
+// not throw" - and since they are a whole group, an info record would otherwise
 // end with a heading-shaped gap. With both empty the group drops out entirely.
 //
 // The JSON view deliberately keeps them: that view is the raw record, this one
@@ -561,15 +553,11 @@ function isHiddenField(k, v) {
   return ERROR_ONLY_FIELDS.has(k) && (v == null || v === '')
 }
 
+// What the record is about leads, and what it is stamped with follows. Which
+// fields those are depends on the shape of the record: a database call opens on
+// the statement, a cluster event on what happened to what.
 function recordFieldGroups(log) {
-  const tags = log.tags
-  const named = new Set(FIELD_GROUPS.flat())
-  const groups = FIELD_GROUPS.map(keys => keys
-    .filter(k => k in tags && !isHiddenField(k, tags[k]))
-    .map(k => [k, tags[k]]))
-  const rest = Object.entries(tags).filter(([k, v]) => !named.has(k) && !isHiddenField(k, v))
-  if (rest.length) groups.push(rest)
-  return groups.filter(g => g.length > 0)
+  return fieldGroupsFor(log, { isHidden: isHiddenField })
 }
 
 // A stack trace is the one field that is a document rather than a value. Left
@@ -579,11 +567,42 @@ function recordFieldGroups(log) {
 // So it gets its own bounded, scrollable box with the original whitespace kept,
 // and the first line separated from the frames: the exception message is what
 // you read, the frames are what you scan.
+// The SDK's resource block and the Kubernetes API's managedFields are on every
+// record of their kind, identical every time. Sorted alphabetically they are
+// the first screen of the record, which is how a drawer opens on a wall of
+// things nobody came to read. They are still part of the record, so they stay -
+// folded, counted, and one click away.
+function NoiseGroup({ fields, hits, record, canPin, onTogglePin, onMenu }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="log-detail-group is-noise">
+      <button type="button" className="log-noise-toggle"
+        aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round"
+          className={open ? 'is-open' : undefined}><path d="M9 18l6-6-6-6" /></svg>
+        {fields.length} agent and platform {fields.length === 1 ? 'field' : 'fields'}
+      </button>
+      {open && fields.map(([k, v]) => (
+        <FieldRow
+          key={k} name={k} value={v} hits={hits} record={record}
+          pinned={false} pinnable={canPin(k)}
+          onTogglePin={onTogglePin} onMenu={onMenu}
+        />
+      ))}
+    </div>
+  )
+}
+
 // One field row, shared by the pinned block and the grouped list so a field
 // looks and behaves the same wherever it currently sits.
-function FieldRow({ name, value, hits, isMsg, pinned, pinnable, onTogglePin, onMenu }) {
-  const link = isMsg ? null : linkFor(name, value)
-  const isStack = name === 'log.stacktrace' && !!value
+function FieldRow({ name, value, hits, record, isMsg, pinned, pinnable, onTogglePin, onMenu }) {
+  const link = isMsg ? null : linkFor(name, value, record)
+  // Any of the four spellings a stack trace arrives under. Matching one name
+  // meant an Elastic agent's error.stack_trace rendered as a wrapped paragraph
+  // with its frames run together - the exact thing this view exists to fix.
+  const isStack = conceptOf(name) === 'stacktrace' && !!value
+  const gloss = isMsg ? null : durationGloss(name, value)
   const block = isStack || isMsg
   return (
     <div className={`log-detail-field${block ? ' is-block' : ''}`}>
@@ -595,7 +614,8 @@ function FieldRow({ name, value, hits, isMsg, pinned, pinnable, onTogglePin, onM
       ) : (
         <span className={`log-detail-val mono${link ? ' is-link' : ''}`} data-log-field={name} data-log-value={value}>
           {highlightTerms(String(value ?? ''), hits)}
-          {link && <LinkMarker hint={link.hint} />}
+          {gloss && <span className="log-detail-gloss">{gloss}</span>}
+          {link && <LinkMarker link={link} />}
         </span>
       )}
       <div className="log-field-actions">
@@ -868,9 +888,12 @@ function LogRecordDrawer({
     !q || k.toLowerCase().includes(q) || String(v ?? '').toLowerCase().includes(q)
 
   const groups = useMemo(() => recordFieldGroups(record)
-    .map(g => g.filter(([k, v]) => !pinned.includes(k) && matches(k, v)))
-    .filter(g => g.length > 0),
+    .map(g => ({ ...g, fields: g.fields.filter(([k, v]) => !pinned.includes(k) && matches(k, v)) }))
+    .filter(g => g.fields.length > 0),
   [record, q, pinned])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const shape = recordType(record)
+  const title = recordTitle(record)
 
   const valueOf = (k) => (k === '_msg' ? record.message : record.tags[k])
   // The stack trace and its exception type are the two fields that cannot be
@@ -890,15 +913,13 @@ function LogRecordDrawer({
       && !isHiddenField(k, valueOf(k)) && matches(k, valueOf(k)))
     .map(k => [k, valueOf(k)])
 
-  // All three show whatever the record holds. A missing endpoint is a fact
-  // about the record, and a row that changes width between logs is harder to
-  // read across than one that keeps its shape.
-  const highlights = HIGHLIGHT_FIELDS
-    .filter(k => k in record.tags && matches(k, record.tags[k]))
-    .map(k => [k, record.tags[k]])
+  // Which fields lead depends on the shape of the record, and each is resolved
+  // through the alias table, so a New Relic service.name occupies the same card
+  // an OTel service would.
+  const highlights = highlightFields(record).filter(([k, v]) => matches(k, v))
 
-  const msgMatches = matches(MSG_LABEL, record.message) || matches('_msg', record.message)
-  const matchCount = groups.reduce((n, g) => n + g.length, 0)
+  const msgMatches = !!title.detail && (matches(MSG_LABEL, title.detail) || matches('_msg', title.detail))
+  const matchCount = groups.reduce((n, g) => n + g.fields.length, 0)
     + pinnedRows.length + highlights.length + (msgMatches ? 1 : 0)
 
   const json = useMemo(() => toRecord(record), [record])
@@ -937,6 +958,11 @@ function LogRecordDrawer({
               status={statusForLogLevel(record.level)}
               label={record.level.charAt(0).toUpperCase() + record.level.slice(1)}
             />
+            {/* A Kubernetes event stores the literal "UNSET" where a message
+                would go, so the shape and the built title are the only things
+                that say what you are looking at. */}
+            <span className="log-detail-shape">{TYPE_LABELS[shape]}</span>
+            {title.title && <span className="log-detail-built-title">{title.title}</span>}
           </div>
           <div className="log-detail-sub mono">
             {record.dateStr}T{record.timeStr}Z
@@ -993,7 +1019,7 @@ function LogRecordDrawer({
             style={{ gridTemplateColumns: `repeat(${highlights.length}, minmax(0, 1fr))` }}
           >
             {highlights.map(([k, v]) => {
-              const link = linkFor(k, v)
+              const link = linkFor(k, v, record)
               return (
                 <div className="log-hl-card" key={k}>
                   <div className="log-hl-head">
@@ -1019,7 +1045,10 @@ function LogRecordDrawer({
                           data-log-field={k}
                           data-log-value={v}
                         >{highlightTerms(String(v), hits)}</span>
-                        {link && <LinkMarker hint={link.hint} />}
+                        {durationGloss(k, v) && (
+                          <span className="log-detail-gloss">{durationGloss(k, v)}</span>
+                        )}
+                        {link && <LinkMarker link={link} />}
                       </>
                     )}
                   </div>
@@ -1061,7 +1090,7 @@ function LogRecordDrawer({
           {msgMatches && (
             <div className="log-detail-group is-msg-card">
               <MessageCard
-                text={record.message}
+                text={title.detail}
                 hits={q ? hits : searchTerms}
                 onCopy={onCopy}
               />
@@ -1072,7 +1101,7 @@ function LogRecordDrawer({
             <div className="log-detail-pinned">
               {pinnedRows.map(([k, v]) => (
                 <FieldRow
-                  key={k} name={k} value={v} hits={hits}
+                  key={k} name={k} value={v} hits={hits} record={record}
                   isMsg={k === '_msg'}
                   pinned pinnable
                   onTogglePin={onTogglePin} onMenu={openMenu}
@@ -1081,15 +1110,20 @@ function LogRecordDrawer({
             </div>
           )}
           {groups.map((group, gi) => (
-            <div className="log-detail-group" key={gi}>
-              {group.map(([k, v]) => (
-                <FieldRow
-                  key={k} name={k} value={v} hits={hits}
-                  pinned={false} pinnable={canPin(k)}
-                  onTogglePin={onTogglePin} onMenu={openMenu}
-                />
-              ))}
-            </div>
+            group.noise
+              ? <NoiseGroup key={gi} fields={group.fields} hits={hits} record={record}
+                  canPin={canPin} onTogglePin={onTogglePin} onMenu={openMenu} />
+              : (
+                <div className="log-detail-group" key={gi}>
+                  {group.fields.map(([k, v]) => (
+                    <FieldRow
+                      key={k} name={k} value={v} hits={hits} record={record}
+                      pinned={false} pinnable={canPin(k)}
+                      onTogglePin={onTogglePin} onMenu={openMenu}
+                    />
+                  ))}
+                </div>
+              )
           ))}
         </div>
       ) : (
@@ -1116,14 +1150,25 @@ function LogRecordDrawer({
                 div rather than a button: nothing happens on press yet, and it
                 should not take focus pretending otherwise. */}
             {(() => {
-              const link = linkFor(menu.field, menu.value)
+              const link = linkFor(menu.field, menu.value, record)
               if (!link) return null
+              // A filter link is something we can actually do today, so it is a
+              // button. An open link is not wired to a destination yet, and a
+              // control that swallows the press teaches people it is broken.
               return (
                 <>
-                  <div className="log-sel-item is-pending" aria-disabled="true" title={link.hint}>
-                    <ArrowUpRight size={14} strokeWidth={2} />
-                    {link.label}
-                  </div>
+                  {link.kind === 'filter' ? (
+                    <button className="log-sel-item" title={link.hint}
+                      onClick={() => run(() => onAddChip({ field: link.field, op: 'eq', value: link.value }))}>
+                      <FilterIcon size={14} strokeWidth={2} />
+                      {link.label}
+                    </button>
+                  ) : (
+                    <div className="log-sel-item is-pending" aria-disabled="true" title={link.hint}>
+                      <ArrowUpRight size={14} strokeWidth={2} />
+                      {link.label}
+                    </div>
+                  )}
                   <div className="log-sel-sep" />
                 </>
               )
