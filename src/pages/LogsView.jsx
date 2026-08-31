@@ -520,6 +520,9 @@ function linkFor(field, value, record) {
 // Marks a value as a doorway. Not a button: there is nothing to press yet, and
 // a control that swallows clicks teaches people the feature is broken.
 function LinkMarker({ link }) {
+  // Guarded because this is a decoration: if a caller ever stops passing a
+  // link, the field should lose its marker, not blank the whole drawer.
+  if (!link) return null
   const filter = link.kind === 'filter'
   return (
     <span className={`log-link-hint${filter ? ' is-filter' : ''}`}
@@ -813,7 +816,7 @@ function jsonLines(data) {
   return out
 }
 
-function JsonLine({ line, number, onKeyMenu }) {
+function JsonLine({ line, number, record, onKeyMenu }) {
   const { kind, depth, name, path, value, comma } = line
   const keyBtn = name != null && (
     <button
@@ -824,7 +827,7 @@ function JsonLine({ line, number, onKeyMenu }) {
     >"{name}"</button>
   )
   const isNum = typeof value === 'number'
-  const link = kind === 'pair' ? linkFor(name, value) : null
+  const link = kind === 'pair' ? linkFor(name, value, record) : null
 
   return (
     <div className="log-json-line">
@@ -846,7 +849,7 @@ function JsonLine({ line, number, onKeyMenu }) {
               {isNum ? String(value) : JSON.stringify(value ?? '')}
             </span>
             <span className="log-json-punc">{comma ? ',' : ''}</span>
-            {link && <LinkMarker hint={link.hint} />}
+            {link && <LinkMarker link={link} />}
           </>
         )}
       </span>
@@ -858,13 +861,14 @@ function JsonLine({ line, number, onKeyMenu }) {
 // text-selection menu, columns in the Fields dropdown, grouping in the pipe
 // toolbar. What was missing was reaching any of them from the field you are
 // looking at, instead of memorising its name and retyping it in the bar.
-function LogRecordDrawer({
+export function LogRecordDrawer({
   record, onClose, searchTerms,
   onAddChip, onDistribution, onCopy,
   index = 0, total = 0, onNavigate,
   pinned = [], onTogglePin,
+  initialView = 'fields',
 }) {
-  const [view, setView] = useState('fields')
+  const [view, setView] = useState(initialView)
   const [menu, setMenu] = useState(null)   // { field, value, x, y }
   const [fieldQuery, setFieldQuery] = useState('')
   // Navigation runs on time, not position: logs are ordered newest-first and
@@ -1130,7 +1134,7 @@ function LogRecordDrawer({
         <div className="log-detail-body log-json-body">
           <div className="log-json">
             {jsonLines(json).map((line, i) => (
-              <JsonLine key={i} line={line} number={i + 1} onKeyMenu={openMenu} />
+              <JsonLine key={i} line={line} number={i + 1} record={record} onKeyMenu={openMenu} />
             ))}
           </div>
         </div>

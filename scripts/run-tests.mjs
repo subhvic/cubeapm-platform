@@ -42,6 +42,9 @@ for (const file of tests) {
       outfile,
       alias: { '@': join(root, 'src') },
       loader: { '.js': 'jsx' },
+      // Automatic runtime, so a component under test compiles without each
+      // module importing React itself - the app's JSX is written that way.
+      jsx: 'automatic',
       logLevel: 'error',
     })
     execFileSync(process.execPath, [outfile], { stdio: 'inherit' })
