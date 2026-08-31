@@ -1,3 +1,5 @@
+import { extraLogRecords } from './logRecordTypes'
+
 export const BASE_TIME = new Date()
 
 const seededRnd = seed => {
@@ -80,7 +82,13 @@ function generateLogs(n = 180) {
   return rows
 }
 
-export const logRows = generateLogs(180)
+// Request logs keep their own seed so adding another record type never
+// reshuffles them. The rest are merged in and the whole stream re-sorted,
+// because a drawer that only ever sees one record shape is not being tested.
+export const logRows = [
+  ...generateLogs(180),
+  ...extraLogRecords({ baseTime: BASE_TIME, rnd: seededRnd(43) }),
+].sort((a, b) => b.time - a.time)
 
 function generateLogVolume(points = 60) {
   const rnd = seededRnd(29)
@@ -101,7 +109,11 @@ export const logFacets = {
     { value: 'info', count: logRows.filter(l => l.level === 'info').length },
     { value: 'warn', count: logRows.filter(l => l.level === 'warn').length },
   ],
-  service: LOG_SERVICES.map(d => ({ value: d, count: logRows.filter(l => l.service === d).length })),
+  // Derived from the rows, not from LOG_SERVICES: span records carry their own
+  // service names and a k8s event carries none, so a fixed list would hide them.
+  service: [...new Set(logRows.map(l => l.service).filter(Boolean))]
+    .sort()
+    .map(d => ({ value: d, count: logRows.filter(l => l.service === d).length })),
 }
 
 export const logTotals = {
