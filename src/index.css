@@ -2808,7 +2808,7 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 /* ---- Save query: the two option blocks ---- */
 .sq-section {
   padding: 10px; border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm); background: var(--panel);
+  border-radius: var(--radius-sm);
 }
 .sq-section-title { font-size: 11.5px; font-weight: 600; color: var(--text-primary); }
 .sq-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
