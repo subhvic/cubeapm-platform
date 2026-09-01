@@ -1663,7 +1663,7 @@ tbody tr:hover { background: var(--panel-2); }
 .logs-query-error-x:hover { opacity: 1; }
 .logs-query-error-x svg { width: 13px; height: 13px; }
 
-/* ── Generated query preview (visible only when pipes are active) ── */
+/* ── Generated query preview (always visible; reads `*` on an empty bar) ── */
 .logs-query-preview {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 16px;

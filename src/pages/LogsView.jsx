@@ -1846,23 +1846,27 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     [appliedPipes]
   )
 
-  // A preview of what the bar currently spells, so it tracks every edit instead
-  // of waiting for Run — it shows the query you are about to run, which is the
-  // one worth reading while you build it. The results deliberately lag behind.
-  const composedQuery = useMemo(
-    () => livePipes.length > 0 ? composeQuery(chipsToString(effectiveChips), livePipes) : '',
-    [effectiveChips, livePipes]
-  )
-
-  // What the bar currently spells, matching the generated-query preview exactly
-  // — copying hands over the query you can see, not the one behind the results.
-  // That also means the icon shows as soon as there is anything to copy.
-  const copyableQuery = useMemo(
+  // What the bar currently spells. Live, not applied: it tracks every edit
+  // rather than waiting for Run, because the query worth reading while you
+  // build it is the one you are about to run. The results deliberately lag.
+  //
+  // One expression feeds both the preview and the copy button, so the two can
+  // never disagree about what the query is.
+  const spelledQuery = useMemo(
     () => (queryMode === 'raw'
       ? rawText.trim()
       : composeQuery(chipsToString(effectiveChips), livePipes)),
     [queryMode, rawText, effectiveChips, livePipes]
   )
+
+  // The preview is always on screen. An empty bar is not the absence of a
+  // query, it is `*`, and saying so is the whole value of the strip: somewhere
+  // to read what will run that is in the same place every time you look.
+  const composedQuery = spelledQuery || '*'
+
+  // Copy stays gated on there being something to copy — handing over `*` would
+  // be handing over nothing.
+  const copyableQuery = spelledQuery
 
   const copyQuery = useCallback(() => {
     if (!copyableQuery) return
@@ -2212,12 +2216,10 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
           availableNames={mathAvailableNames}
         />
 
-        {composedQuery && (
-          <div className="logs-query-preview">
-            <span className="qb-preview-label">Generated Query</span>
-            <code className="qb-preview-code">{composedQuery}</code>
-          </div>
-        )}
+        <div className="logs-query-preview">
+          <span className="qb-preview-label">Generated Query</span>
+          <code className="qb-preview-code">{composedQuery}</code>
+        </div>
 
         <div className="logs-controls">
           <div className="logs-controls-left">
