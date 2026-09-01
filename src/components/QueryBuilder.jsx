@@ -26,6 +26,41 @@ export const FIELD_CATALOG = [
   { field: 'http.status',        type: 'keyword', desc: 'HTTP status code' },
   { field: 'duration_ms',        type: 'keyword', desc: 'Request duration (ms)' },
   { field: 'trace_id',           type: 'string',  desc: 'Trace identifier', highCard: true },
+
+  // Added with the non-request record shapes. The catalogue drives what can be
+  // typed and autocompleted; evaluation already falls through to log.tags, so
+  // a field missing from here still filters - it just cannot be reached from
+  // the keyboard, which is the same as not existing.
+  { field: 'event.domain',       type: 'string',  desc: 'Record domain (k8s, span)' },
+  { field: 'severity',           type: 'string',  desc: 'Log severity (OTel spelling)' },
+  { field: 'level',              type: 'string',  desc: 'Log severity (New Relic spelling)' },
+  { field: 'service.name',       type: 'string',  desc: 'Service name (OTel/NR spelling)' },
+  { field: 'host.name',          type: 'string',  desc: 'Host' },
+  { field: 'hostname',           type: 'string',  desc: 'Host (New Relic spelling)' },
+  { field: 'trace.id',           type: 'string',  desc: 'Trace identifier (NR/ECS spelling)', highCard: true },
+  { field: 'span_id',            type: 'string',  desc: 'Span identifier', highCard: true },
+  { field: 'span.id',            type: 'string',  desc: 'Span identifier (NR spelling)', highCard: true },
+
+  { field: 'object.type',        type: 'string',  desc: 'k8s event type (Normal, Warning)' },
+  { field: 'object.reason',      type: 'string',  desc: 'k8s event reason' },
+  { field: 'object.regarding.kind', type: 'string', desc: 'k8s object the event is about' },
+  { field: 'k8s.namespace.name', type: 'string',  desc: 'Kubernetes namespace' },
+  { field: 'k8s.pod.name',       type: 'string',  desc: 'Kubernetes pod' },
+  { field: 'k8s.node.name',      type: 'string',  desc: 'Kubernetes node' },
+  { field: 'k8s.container.name', type: 'string',  desc: 'Container' },
+
+  { field: 'db.system',          type: 'string',  desc: 'Database engine' },
+  { field: 'db.operation',       type: 'string',  desc: 'Database operation' },
+  { field: 'db.name',            type: 'string',  desc: 'Database name' },
+  { field: 'db.sql.table',       type: 'string',  desc: 'SQL table' },
+  { field: 'span_kind',          type: 'string',  desc: 'Span kind (server, client)' },
+  { field: 'duration',           type: 'keyword', desc: 'Span duration (nanoseconds)' },
+
+  { field: 'error.class',        type: 'string',  desc: 'Exception class (New Relic spelling)' },
+  { field: 'error.type',         type: 'string',  desc: 'Exception class (ECS spelling)' },
+  { field: 'exception.type',     type: 'string',  desc: 'Exception class (OTel spelling)' },
+  { field: 'log.logger',         type: 'string',  desc: 'Logger name (ECS spelling)' },
+  { field: 'logger.name',        type: 'string',  desc: 'Logger name (New Relic spelling)' },
 ]
 
 const FIELD_BY_NAME = Object.fromEntries(FIELD_CATALOG.map(f => [f.field, f]))

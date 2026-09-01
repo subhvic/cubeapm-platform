@@ -1,3 +1,6 @@
+import { extraLogRecords } from './logRecordTypes'
+import { isNoiseField } from '@/utils/logFields'
+
 export const BASE_TIME = new Date()
 
 const seededRnd = seed => {
@@ -80,7 +83,13 @@ function generateLogs(n = 180) {
   return rows
 }
 
-export const logRows = generateLogs(180)
+// Request logs keep their own seed so adding another record type never
+// reshuffles them. The rest are merged in and the whole stream re-sorted,
+// because a drawer that only ever sees one record shape is not being tested.
+export const logRows = [
+  ...generateLogs(180),
+  ...extraLogRecords({ baseTime: BASE_TIME, rnd: seededRnd(43) }),
+].sort((a, b) => b.time - a.time)
 
 function generateLogVolume(points = 60) {
   const rnd = seededRnd(29)
@@ -111,9 +120,63 @@ const FACET_MAX_VALUE_LEN = 60
 // every other facet leads with its most common value.
 const FACET_VALUE_ORDER = { 'log.level': ['error', 'warn', 'info'] }
 
+// A field whose every value is an identity - a uuid, a span id, a timestamp, an
+// opaque token - is not a filter. Picking one of its values selects the single
+// record you already had.
+//
+// This is a test on the SHAPE of the values, deliberately not on how many there
+// are. Counting cannot separate the two cases here: on the seeded rows both
+// `object.metadata.uid` and `object.reason` carry four distinct values across
+// the four rows that have them, so any ratio strict enough to drop the uuids
+// also drops SuccessfulCreate / BackOff, which is one of the more useful facets
+// on the page. The absolute cap above already handles the other direction, a
+// field with more values than anyone would scroll.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/
+const HEX_RUN = /^[0-9a-f]+$/i
+
+export function isIdentityValue(v) {
+  if (ISO_INSTANT.test(v)) return true
+  // A long unbroken hex run is a trace or span id.
+  if (v.length >= 16 && HEX_RUN.test(v)) return true
+  // A uuid, tested by composition rather than by the 8-4-4-4-12 layout: the
+  // seeded pod uids run a ten-character final group, and real telemetry carries
+  // malformed ids too. Enough hex once the dashes come out is the durable
+  // signal; the exact grouping is not.
+  const undashed = v.replace(/-/g, '')
+  if (undashed.length >= 24 && HEX_RUN.test(undashed)) return true
+  // An opaque token: long, unbroken, and drawing on upper, lower and digits at
+  // once. Real category names are shorter or carry a separator.
+  return v.length >= 24 && /^[A-Za-z0-9+/=_-]+$/.test(v)
+    && /[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v)
+}
+
+// Numbers need the count after all, because shape cannot tell a measurement
+// from a code: 200 and 24000000 are both just digits. What separates them is
+// that a status code repeats across rows and a duration does not, so a numeric
+// field is only rejected once nearly every row carrying it has its own value.
+// This is why `http.status` survives (3 values over 193 rows) and `duration`
+// does not (4 over 4).
+const MEASUREMENT_RATIO = 0.6
+
+export function isNumericValue(v) {
+  return /^-?\d+(\.\d+)?$/.test(v)
+}
+
 function buildLogFacets(rows) {
   const out = {}
-  for (const key of Object.keys(rows[0]?.tags ?? {})) {
+  // Keys come from every row, not just the first. Records arrive in several
+  // shapes now - a k8s event, a database span and a request log carry different
+  // tags - so sampling the newest row would hand the panel whichever shape
+  // happened to be on top.
+  //
+  // Agent boilerplate is left out: the SDK's resource block is identical on
+  // every row of its kind, so it makes a facet whose only value is already
+  // implied by the rows carrying it.
+  const keys = new Set()
+  for (const row of rows) for (const k of Object.keys(row.tags ?? {})) {
+    if (!isNoiseField(k)) keys.add(k)
+  }
+  for (const key of keys) {
     const counts = new Map()
     let populated = 0
     for (const row of rows) {
@@ -123,9 +186,12 @@ function buildLogFacets(rows) {
       const v = String(raw)
       counts.set(v, (counts.get(v) || 0) + 1)
     }
+    const values = [...counts.keys()]
     if (counts.size === 0 || counts.size > FACET_MAX_DISTINCT) continue
-    if ([...counts.keys()].some(v => v.length > FACET_MAX_VALUE_LEN)) continue
+    if (values.some(v => v.length > FACET_MAX_VALUE_LEN)) continue
     if (counts.size === 1 && populated === rows.length) continue
+    if (values.every(isIdentityValue)) continue
+    if (counts.size / populated >= MEASUREMENT_RATIO && values.every(isNumericValue)) continue
 
     const fixed = FACET_VALUE_ORDER[key]
     out[key] = [...counts.entries()]
@@ -312,6 +378,43 @@ export const k8sPods = K8S_POD_ROWS.map((p, i) => ({
 }))
 
 export const K8S_NAMESPACES = ['default', 'kube-system']
+
+/**
+ * The namespace rollup behind /infra?tab=k8s-cluster&section=<namespace>.
+ *
+ * Derived from the pods and the per-namespace allocation rather than stored, so
+ * it cannot drift from the pod list the drill-down shows. Node counts are
+ * deliberately absent: a node is not namespaced, which is the one real
+ * difference between this view and the cluster it sits inside.
+ */
+export function k8sNamespaceDetail(namespace) {
+  const alloc = k8sNamespaceSummary.find(n => n.namespace === namespace)
+  if (!alloc) return null
+  const pods = k8sPods.filter(p => p.namespace === namespace)
+  const deploy = k8sDeploymentSummary.find(d => d.namespace === namespace)
+  const isSystem = namespace === 'kube-system'
+  return {
+    namespace,
+    alloc,
+    pods,
+    podsTotal: pods.length,
+    podsPending: 0,
+    podsFailed: 0,
+    containersReady: alloc.containers,
+    containersTotal: alloc.containers,
+    daemonSetsTotal: isSystem ? 2 : 0,
+    daemonSetsUnhealthy: 0,
+    deploymentsTotal: deploy?.deployments ?? 0,
+    deploymentsUnhealthy: 0,
+    hpasTotal: 0,
+    statefulSetsTotal: isSystem ? 0 : 1,
+    statefulSetsUnhealthy: 0,
+    replicaSetsTotal: deploy?.deployments ?? 0,
+    replicaSetsUnhealthy: 0,
+    replControllersTotal: 0,
+    replControllersUnhealthy: 0,
+  }
+}
 
 /* ============ MYSQL ============ */
 
