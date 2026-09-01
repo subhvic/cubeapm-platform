@@ -294,6 +294,24 @@ test('suggest: empty input offers fields', () => {
   assert.ok(r.items.some(i => i.value === '_msg'))
 })
 
+// The bug this pins: a flat cap over the concatenated list drops whatever sits
+// last, so growing the field catalogue silently cost the raw editor its
+// built-ins and its boolean keywords. Deliberately asserts nothing about how
+// many fields come back - only that a bigger catalogue can never crowd out a
+// category, which is the property that broke.
+test('suggest: a large field catalogue cannot crowd out the other categories', () => {
+  const empty = suggestRaw('', 0)
+  for (const b of ['_msg', '_time', '_stream']) {
+    assert.ok(empty.items.some(i => i.value === b), `built-in ${b} missing from an empty query`)
+  }
+  const after = suggestRaw('service:=payment ', 17)
+  for (const k of ['AND', 'OR', '|']) {
+    assert.ok(after.items.some(i => i.value === k), `keyword ${k} missing after a term`)
+  }
+  // The catalogue itself is still capped - the point is where the cap applies.
+  assert.ok(empty.items.filter(i => i.kind === 'field').length <= 20)
+})
+
 test('suggest: partial field name filters', () => {
   const r = suggestRaw('serv', 4)
   assert.ok(r.items.every(i => /^serv/i.test(i.value)))

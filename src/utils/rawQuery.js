@@ -344,9 +344,13 @@ export function validatePipeText(pipes) {
 
 // ---------- Suggestions ----------
 
+// Built-ins lead: they exist on every record whatever the agent, whereas the
+// catalogue is whatever this instance happens to index. `_msg` in particular
+// is the field most queries start from, so it must not sit behind forty
+// spellings of somebody's trace id.
 const ALL_FIELDS = [
+  ...BUILTIN_FIELDS.map(f => ({ value: f.field, detail: f.desc, kind: 'builtin' })),
   ...FIELD_CATALOG.map(f => ({ value: f.field, detail: f.desc, kind: 'field' })),
-  ...BUILTIN_FIELDS.map(f => ({ value: f.field, detail: f.desc, kind: 'field' })),
 ]
 
 const OP_SUGGESTIONS = [
@@ -373,9 +377,10 @@ const FN_SUGGESTIONS = STAT_FUNCTIONS.map(f => ({
   kind: 'function',
 }))
 
-// Long enough that no category is silently truncated: the pipe catalog is the
-// longest at 13 entries.
-const MAX_SUGGESTIONS = 20
+// Caps the indexed field catalogue, which is the only open-ended category —
+// one instance can index hundreds of fields. Every other category is a fixed
+// handful and is never truncated; see `wrap`.
+const MAX_FIELD_SUGGESTIONS = 20
 
 function startsWithCI(a, b) { return a.toLowerCase().startsWith(b.toLowerCase()) }
 
@@ -400,11 +405,22 @@ export function suggestRaw(text, caret) {
   const from = tokenStart(s, pos)
   const word = s.slice(from, pos)
 
-  const wrap = (items) => ({
-    items: items.filter(it => !word || startsWithCI(it.value.trim(), word.trim())).slice(0, MAX_SUGGESTIONS),
-    from,
-    to: pos,
-  })
+  // A single cap over the concatenated list truncates whatever happens to sit
+  // last, which is how a larger field catalogue once pushed the boolean
+  // keywords and the pipe opener off the end of the list entirely. Only the
+  // catalogue is capped; the fixed categories are always kept, whatever order
+  // the caller assembled them in.
+  const wrap = (items) => {
+    const matched = items.filter(it => !word || startsWithCI(it.value.trim(), word.trim()))
+    const catalogue = matched.filter(it => it.kind === 'field')
+    if (catalogue.length <= MAX_FIELD_SUGGESTIONS) return { items: matched, from, to: pos }
+    const keep = new Set(catalogue.slice(0, MAX_FIELD_SUGGESTIONS))
+    return {
+      items: matched.filter(it => it.kind !== 'field' || keep.has(it)),
+      from,
+      to: pos,
+    }
+  }
 
   if (inPipeSection) {
     // Which stage are we in, and is this the stage's first word?
