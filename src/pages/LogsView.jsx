@@ -246,19 +246,52 @@ function formatHistoryTime(d) {
   return `${Math.floor(diff / 86400000)}d ago`
 }
 
+// Absolute, not "2h ago". The seeded history is anchored to the mock
+// BASE_TIME, but a saved query is stamped with the real clock, so a relative
+// figure would be measured against a clock that is not running.
+function formatSavedAt(ts) {
+  if (!ts) return null
+  return new Date(ts).toLocaleString(undefined, {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+// role="switch" rather than a styled checkbox: the control reports its own
+// state to a screen reader, and the visible label sits beside it as the
+// accessible name, so nothing here is an unlabelled shape.
+function Toggle({ checked, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={`sq-toggle${checked ? ' is-on' : ''}`}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="sq-toggle-knob" />
+    </button>
+  )
+}
+
 // Saving keeps the chips and pipes, not the string it renders to. Reapplying a
 // saved query should put the builder back exactly as it was — a string would
 // have to be reparsed, and anything the parser cannot express would come back
 // as free text instead of the filters the user actually saved.
-function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingNames }) {
+function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingNames, timeRange }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [lockTime, setLockTime] = useState(false)
+  const [defaultView, setDefaultView] = useState(false)
   const inputRef = useRef(null)
 
   useEffect(() => {
     if (!open) return
     setName('')
     setDescription('')
+    setLockTime(false)
+    setDefaultView(false)
     // The field is the only thing in here; landing anywhere else costs a click.
     const t = setTimeout(() => inputRef.current?.focus(), 0)
     return () => clearTimeout(t)
@@ -268,7 +301,7 @@ function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingN
   const duplicate = existingNames.some(n => n.toLowerCase() === trimmed.toLowerCase())
   const submit = () => {
     if (!trimmed || duplicate) return
-    onSave(trimmed, description.trim())
+    onSave(trimmed, description.trim(), { lockTime, defaultView })
     onClose()
   }
 
@@ -310,6 +343,34 @@ function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingN
             }}
           />
         </label>
+        <div className="sq-section">
+          <div className="sq-section-title">Time range</div>
+          <div className="sq-row">
+            <span className="sq-row-value">{timeRange}</span>
+            <div className="sq-row-ctl">
+              <Toggle checked={lockTime} onChange={setLockTime} label="Lock time" />
+              <span className="sq-row-label">Lock time</span>
+              <span
+                className="sq-help"
+                tabIndex={0}
+                role="note"
+                aria-label="Locked, the query reopens on this exact range. Unlocked, it uses whichever range is selected at the time."
+                title="Locked, the query reopens on this exact range. Unlocked, it uses whichever range is selected at the time."
+              >?</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="sq-section">
+          <div className="sq-row">
+            <div className="sq-row-text">
+              <div className="sq-section-title">Set as default view</div>
+              <div className="sq-row-sub">Make this the default view</div>
+            </div>
+            <Toggle checked={defaultView} onChange={setDefaultView} label="Set as default view" />
+          </div>
+        </div>
+
         <div className="sq-preview">
           <span className="sq-preview-label">Saving</span>
           <code>{preview}</code>
@@ -358,6 +419,13 @@ function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
       <div className="qh-item-meta">
         <code className="qh-item-query">{composeQuery(chipsToString(q.chips), withImpliedCount(q.pipes || []))}</code>
       </div>
+      {(q.timeRange || q.isDefault || q.savedAt) && (
+        <div className="sq-item-tags">
+          {q.timeRange && <span className="sq-tag">{q.timeRange}</span>}
+          {q.isDefault && <span className="sq-tag is-default">Default view</span>}
+          {q.savedAt && <span className="sq-item-saved">Saved {formatSavedAt(q.savedAt)}</span>}
+        </div>
+      )}
     </div>
   )
 
@@ -2055,13 +2123,29 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     return hit?.description ? hit : null
   }, [savedQueries, matchesQuery, canSaveQuery])
 
-  const saveQuery = useCallback((name, description) => {
+  // `lockTime` is the difference between saving a question and saving an
+  // answer: locked keeps the window the query was written for, unlocked lets
+  // it follow whatever range is on screen when it is next opened.
+  //
+  // Only one query can be the default, so setting the flag clears it
+  // elsewhere rather than leaving two claims to the same slot.
+  const saveQuery = useCallback((name, description, { lockTime, defaultView } = {}) => {
+    const entry = {
+      id: `sq-${Date.now()}`,
+      savedAt: Date.now(),
+      name,
+      description,
+      chips: effectiveChips,
+      pipes,
+      timeRange: lockTime ? timeRange : null,
+      isDefault: !!defaultView,
+    }
     setSavedQueries(prev => [
-      { id: `sq-${Date.now()}`, name, description, chips: effectiveChips, pipes },
-      ...prev,
+      entry,
+      ...(defaultView ? prev.map(q => ({ ...q, isDefault: false })) : prev),
     ])
     setToast?.(`Saved “${name}” to My Queries`)
-  }, [effectiveChips, pipes, setToast])
+  }, [effectiveChips, pipes, timeRange, setToast])
 
   // Reapplying runs it. A saved query is a destination, not a draft — landing
   // on the builder with the filters loaded but the old results still showing
@@ -2074,8 +2158,11 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     setPipes(nextPipes)
     setAppliedPipes(nextPipes)
     setQuery('')
+    // Only when it was locked. Otherwise the range on screen is the one the
+    // user chose most recently, and overriding it would undo that silently.
+    if (q.timeRange) setTimeRange?.(q.timeRange)
     setMyQueriesOpen(false)
-  }, [])
+  }, [setTimeRange])
 
   const deleteSavedQuery = useCallback((id) => {
     setSavedQueries(prev => prev.filter(q => q.id !== id))
@@ -2414,6 +2501,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
           onSave={saveQuery}
           preview={composedQuery}
           existingNames={savedQueries.map(q => q.name)}
+          timeRange={timeRange}
         />
         <AggregationPopover
           anchorRef={aggPillRef}
