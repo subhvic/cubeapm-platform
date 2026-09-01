@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, ResponsiveContainer } from 'recharts'
 import { logRows, logVolume, logFacets, BASE_TIME } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
-import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue } from '@/components/QueryBuilder'
+import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue, SAVED_QUERIES } from '@/components/QueryBuilder'
 import { flattenLeaves, newGroup } from '@/utils/queryTree'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
@@ -16,7 +16,8 @@ import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon } from 'lucide-react'
+import PipePopover from '@/components/PipePopover'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, Bookmark, BookmarkPlus } from 'lucide-react'
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
@@ -243,6 +244,136 @@ function formatHistoryTime(d) {
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
   return `${Math.floor(diff / 86400000)}d ago`
+}
+
+// Saving keeps the chips and pipes, not the string it renders to. Reapplying a
+// saved query should put the builder back exactly as it was — a string would
+// have to be reparsed, and anything the parser cannot express would come back
+// as free text instead of the filters the user actually saved.
+function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingNames }) {
+  const [name, setName] = useState('')
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    setName('')
+    // The field is the only thing in here; landing anywhere else costs a click.
+    const t = setTimeout(() => inputRef.current?.focus(), 0)
+    return () => clearTimeout(t)
+  }, [open])
+
+  const trimmed = name.trim()
+  const duplicate = existingNames.some(n => n.toLowerCase() === trimmed.toLowerCase())
+  const submit = () => {
+    if (!trimmed || duplicate) return
+    onSave(trimmed)
+    onClose()
+  }
+
+  return (
+    <PipePopover
+      anchorRef={anchorRef}
+      open={open}
+      onClose={onClose}
+      title="Save query"
+      subtitle="Keeps the filters and pipes as they are now"
+      align="right"
+      width={320}
+    >
+      <div className="agg-form">
+        <label className="agg-field">
+          <span className="agg-lbl">Name</span>
+          <input
+            ref={inputRef}
+            className="agg-input"
+            value={name}
+            placeholder="e.g. Checkout errors"
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); submit() }
+            }}
+          />
+        </label>
+        <div className="sq-preview">
+          <span className="sq-preview-label">Saving</span>
+          <code>{preview}</code>
+        </div>
+        {duplicate && <div className="sq-warn">A query called “{trimmed}” already exists.</div>}
+        <div className="agg-actions">
+          <button type="button" className="agg-btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="agg-btn is-primary" disabled={!trimmed || duplicate} onClick={submit}>
+            Save
+          </button>
+        </div>
+      </div>
+    </PipePopover>
+  )
+}
+
+// The seeded examples are listed alongside what the user has saved so the panel
+// is never empty on a first visit, but only their own are removable — deleting
+// a worked example out of a prototype leaves nothing to put back.
+function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
+  const [search, setSearch] = useState('')
+
+  const match = (q) => !search
+    || q.name.toLowerCase().includes(search.toLowerCase())
+    || chipsToString(q.chips).toLowerCase().includes(search.toLowerCase())
+
+  const mine = saved.filter(match)
+  const shown = examples.filter(match)
+
+  const Row = ({ q, onRemove }) => (
+    <div className="qh-item" onClick={() => onApply(q)}>
+      <div className="qh-item-top">
+        <span className="sq-item-name">{q.name}</span>
+        {onRemove && (
+          <button
+            className="sq-item-del"
+            title={`Delete “${q.name}”`}
+            aria-label={`Delete ${q.name}`}
+            onClick={(e) => { e.stopPropagation(); onRemove(q.id) }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        )}
+      </div>
+      <div className="qh-item-meta">
+        <code className="qh-item-query">{composeQuery(chipsToString(q.chips), withImpliedCount(q.pipes || []))}</code>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="alert-drawer-overlay" onClick={onClose}>
+      <aside className="alert-drawer qh-drawer" onClick={e => e.stopPropagation()}>
+        <div className="alert-drawer-head">
+          <div>
+            <div className="alert-drawer-title">My Queries</div>
+            <div className="alert-drawer-sub">Saved filters and pipes, ready to reapply</div>
+          </div>
+          <button className="log-detail-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="qh-toolbar">
+          <div className="qh-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input placeholder="Search saved queries…" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="qh-list">
+          {mine.length === 0 && shown.length === 0 && (
+            <div className="qh-empty">No saved queries match your search</div>
+          )}
+          {mine.length > 0 && <div className="sq-group">Saved by you</div>}
+          {mine.map(q => <Row key={q.id} q={q} onRemove={onDelete} />)}
+          {shown.length > 0 && <div className="sq-group">Examples</div>}
+          {shown.map(q => <Row key={q.name} q={q} />)}
+        </div>
+      </aside>
+    </div>
+  )
 }
 
 function QueryHistoryDrawer({ onClose, onApply /*, savedNames, onToggleSave — disabled, kept for future restoration */ }) {
@@ -1491,6 +1622,11 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [myQueriesOpen, setMyQueriesOpen] = useState(false)
+  const [saveQueryOpen, setSaveQueryOpen] = useState(false)
+  const [savedQueries, setSavedQueries] = useState([])
+  const myQueriesBtnRef = useRef(null)
+  const saveQueryBtnRef = useRef(null)
   // Saved-query state disabled — kept for future restoration:
   //   const [historySaved, setHistorySaved] = useState(
   //     () => Object.fromEntries(QUERY_HISTORY.map(h => [h.id, h.saved]))
@@ -1868,6 +2004,37 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   // be handing over nothing.
   const copyableQuery = spelledQuery
 
+  // Saving stores what the builder holds, not what it renders to — see
+  // SaveQueryPopover. Raw mode has no chips to store, and a query of `*` is
+  // not worth a name, so neither can be saved.
+  const canSaveQuery = queryMode !== 'raw' && (effectiveChips.length > 0 || livePipes.length > 0)
+
+  const saveQuery = useCallback((name) => {
+    setSavedQueries(prev => [
+      { id: `sq-${Date.now()}`, name, chips: effectiveChips, pipes },
+      ...prev,
+    ])
+    setToast?.(`Saved “${name}” to My Queries`)
+  }, [effectiveChips, pipes, setToast])
+
+  // Reapplying runs it. A saved query is a destination, not a draft — landing
+  // on the builder with the filters loaded but the old results still showing
+  // would be the one state nobody wants.
+  const applySavedQuery = useCallback((q) => {
+    const nextChips = q.chips ?? []
+    const nextPipes = q.pipes ?? []
+    setChips(nextChips)
+    setAppliedChips(nextChips)
+    setPipes(nextPipes)
+    setAppliedPipes(nextPipes)
+    setQuery('')
+    setMyQueriesOpen(false)
+  }, [])
+
+  const deleteSavedQuery = useCallback((id) => {
+    setSavedQueries(prev => prev.filter(q => q.id !== id))
+  }, [])
+
   const copyQuery = useCallback(() => {
     if (!copyableQuery) return
     // writeText rejects rather than throws when the clipboard is blocked, so
@@ -2160,7 +2327,40 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
               </PipePillChip>
             )}
           </PipePill>
+
+          {/* Pushed to the far end: these act on the whole query, not on one
+              stage of it, so they should not read as another pipe to add. */}
+          <div className="pipe-toolbar-right">
+            <button
+              ref={myQueriesBtnRef}
+              className={`hbtn small${myQueriesOpen ? ' active' : ''}`}
+              onClick={() => setMyQueriesOpen(true)}
+            >
+              <Bookmark size={14} strokeWidth={2} />
+              My Queries
+            </button>
+            <button
+              ref={saveQueryBtnRef}
+              className={`hbtn small${saveQueryOpen ? ' active' : ''}`}
+              disabled={!canSaveQuery}
+              title={canSaveQuery
+                ? 'Save these filters and pipes'
+                : 'Add a filter or a pipe first — there is nothing to save yet'}
+              onClick={() => setSaveQueryOpen(o => !o)}
+            >
+              <BookmarkPlus size={14} strokeWidth={2} />
+              Save Query
+            </button>
+          </div>
         </div>
+        <SaveQueryPopover
+          anchorRef={saveQueryBtnRef}
+          open={saveQueryOpen}
+          onClose={() => setSaveQueryOpen(false)}
+          onSave={saveQuery}
+          preview={composedQuery}
+          existingNames={savedQueries.map(q => q.name)}
+        />
         <AggregationPopover
           anchorRef={aggPillRef}
           open={aggPopOpen}
@@ -2399,6 +2599,15 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     </div>
     {alertOpen && <AlertDrawer filters={filters} query={query} onClose={() => setAlertOpen(false)} />}
     {patternsOpen && <PatternsDrawer onClose={() => setPatternsOpen(false)} />}
+    {myQueriesOpen && (
+      <MyQueriesDrawer
+        onClose={() => setMyQueriesOpen(false)}
+        saved={savedQueries}
+        examples={SAVED_QUERIES}
+        onApply={applySavedQuery}
+        onDelete={deleteSavedQuery}
+      />
+    )}
     {historyOpen && (
       <QueryHistoryDrawer
         onClose={() => setHistoryOpen(false)}

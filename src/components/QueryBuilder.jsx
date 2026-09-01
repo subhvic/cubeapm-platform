@@ -216,7 +216,7 @@ function buildFreeTextOptions(typed) {
   return opts
 }
 
-const SAVED_QUERIES = [
+export const SAVED_QUERIES = [
   { name: 'Payments — errors last hour', chips: [
     { field: 'service',   op: 'eq', value: 'payment' },
     { field: 'log.level', op: 'eq', value: 'error' },

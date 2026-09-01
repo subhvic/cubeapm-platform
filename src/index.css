@@ -2300,6 +2300,14 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
   padding: 4px 14px 14px;
 }
 
+/* Sits at the far end of the toolbar. `margin-left: auto` rather than
+   justify-content, so the pills keep their own left-to-right rhythm and only
+   this group is pushed away; when the toolbar wraps, the pair travels to the
+   new row together instead of splitting. */
+.pipe-toolbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.pipe-toolbar-right .hbtn[disabled] { opacity: .45; cursor: not-allowed; }
+.pipe-toolbar-right .hbtn[disabled]:hover { color: var(--text-secondary); border-color: var(--border-subtle); }
+
 .pipe-pill {
   display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px;
   /* min-height rather than height: a pill wide enough to wrap its own chips
@@ -2707,6 +2715,36 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .agg-btn.is-primary { background: var(--brand); color: #fff; border-color: var(--brand); }
 .agg-btn.is-primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
 .agg-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---- Save query / My Queries ---- */
+.sq-preview {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--panel); border: 1px solid var(--border-subtle);
+}
+.sq-preview-label {
+  font-size: 9.5px; font-weight: 600; letter-spacing: .5px;
+  text-transform: uppercase; color: var(--text-muted);
+}
+/* The query can be long and must not stretch the popover, so it wraps on any
+   character rather than overflowing. */
+.sq-preview code {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  color: var(--text-secondary); word-break: break-all; line-height: 1.5;
+}
+.sq-warn { font-size: 11px; color: var(--status-warning); }
+.sq-group {
+  padding: 10px 14px 4px; font-size: 9.5px; font-weight: 600;
+  letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted);
+}
+.sq-item-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.sq-item-del {
+  display: inline-flex; padding: 2px; background: none; border: 0;
+  color: var(--text-muted); cursor: pointer; opacity: 0; transition: opacity .12s, color .12s;
+}
+.sq-item-del svg { width: 13px; height: 13px; }
+.qh-item:hover .sq-item-del { opacity: 1; }
+.sq-item-del:hover { color: var(--status-critical); }
 
 /* ============ Alert drawer ============ */
 .alert-drawer-overlay {
