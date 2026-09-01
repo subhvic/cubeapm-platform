@@ -2305,8 +2305,26 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
    this group is pushed away; when the toolbar wraps, the pair travels to the
    new row together instead of splitting. */
 .pipe-toolbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.pipe-toolbar-right .hbtn[disabled] { opacity: .45; cursor: not-allowed; }
-.pipe-toolbar-right .hbtn[disabled]:hover { color: var(--text-secondary); border-color: var(--border-subtle); }
+
+/* The same shell as a pill, so the toolbar reads as one row of controls rather
+   than two kinds of button sharing a line. These carry no add affordance, so
+   the padding is even where a pill's is weighted to leave room for its `+`. */
+.pipe-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 30px; padding: 2px 12px;
+  background: transparent; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted); font-family: inherit; font-size: 12.5px; font-weight: 500;
+  cursor: pointer; transition: background .12s, border-color .12s, color .12s;
+  user-select: none;
+}
+.pipe-btn:hover:not(:disabled) { background: var(--panel-2); border-color: var(--border-panel); color: var(--text-primary); }
+.pipe-btn.is-active { border-color: var(--brand); }
+.pipe-btn:disabled { opacity: .45; cursor: not-allowed; }
+/* Square, so an icon on its own sits centred rather than adrift in a slot cut
+   for a label. Matches the pill's height exactly. */
+.pipe-btn.is-icon { width: 30px; padding: 0; justify-content: center; }
+.pipe-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
 
 .pipe-pill {
   display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px;

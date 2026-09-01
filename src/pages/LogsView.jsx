@@ -17,7 +17,7 @@ import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
 import PipePopover from '@/components/PipePopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, Bookmark, BookmarkPlus } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus } from 'lucide-react'
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
@@ -2332,24 +2332,23 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
               stage of it, so they should not read as another pipe to add. */}
           <div className="pipe-toolbar-right">
             <button
-              ref={myQueriesBtnRef}
-              className={`hbtn small${myQueriesOpen ? ' active' : ''}`}
-              onClick={() => setMyQueriesOpen(true)}
-            >
-              <Bookmark size={14} strokeWidth={2} />
-              My Queries
-            </button>
-            <button
               ref={saveQueryBtnRef}
-              className={`hbtn small${saveQueryOpen ? ' active' : ''}`}
+              className={`pipe-btn is-icon${saveQueryOpen ? ' is-active' : ''}`}
               disabled={!canSaveQuery}
               title={canSaveQuery
-                ? 'Save these filters and pipes'
+                ? 'Save query'
                 : 'Add a filter or a pipe first — there is nothing to save yet'}
+              aria-label="Save query"
               onClick={() => setSaveQueryOpen(o => !o)}
             >
-              <BookmarkPlus size={14} strokeWidth={2} />
-              Save Query
+              <BookmarkPlus strokeWidth={2} />
+            </button>
+            <button
+              ref={myQueriesBtnRef}
+              className={`pipe-btn${myQueriesOpen ? ' is-active' : ''}`}
+              onClick={() => setMyQueriesOpen(true)}
+            >
+              My Queries
             </button>
           </div>
         </div>
