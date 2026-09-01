@@ -1041,31 +1041,19 @@ tbody tr:hover { background: var(--panel-2); }
 .facet-clear-btn-meta:hover { color: var(--text-primary); }
 .facet-clear-btn-meta svg { width: 10px; height: 10px; flex-shrink: 0; }
 /* 'link' variant — own line beneath the meta row, appears only once something is selected. */
-/* A facet row is two controls sharing one line: the checkbox toggles this one
-   value, the rest of the row narrows to it alone (or restores everything when
-   it is already alone). Neither half looks different from the other, so each
-   says what it does on hover — that label is the only thing separating a
-   checklist from a radio group. */
-.facet-opt { display: flex; align-items: center; font-size: 11px; }
-.facet-opt:hover { background: var(--panel-2); }
-.facet-opt-box { display: flex; align-items: center; padding: 4px 6px 4px 12px; cursor: pointer; flex-shrink: 0; }
-.facet-opt-box input { accent-color: var(--brand); display: block; cursor: pointer; }
-.facet-opt-main {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
-  padding: 4px 12px 4px 2px; background: none; border: 0; cursor: pointer;
-  font: inherit; text-align: left; color: inherit;
+.facet-meta-count { color: var(--text-primary); font-weight: 600; }
+.facet-sel-link {
+  display: inline-block; margin-top: 4px; padding: 0;
+  background: none; border: none; line-height: 1;
+  color: var(--brand); font-family: inherit; font-size: 10px; font-weight: 600;
+  cursor: pointer; transition: filter .12s;
 }
+.facet-sel-link:hover { filter: brightness(1.2); text-decoration: underline; }
+.facet-opt { display: flex; align-items: center; gap: 8px; padding: 4px 12px; cursor: pointer; font-size: 11px; }
+.facet-opt:hover { background: var(--panel-2); }
+.facet-opt input { accent-color: var(--brand); flex-shrink: 0; }
 .facet-opt-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
 .facet-opt-count { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
-
-/* Both signifiers occupy the same slot and only one is ever shown, so the
-   count never shifts as the pointer crosses between the two halves. */
-.facet-opt-hint { flex-shrink: 0; font-size: 9.5px; letter-spacing: .02em; color: var(--text-muted); }
-.facet-opt-hint > span { display: none; }
-.facet-opt-main:hover .hint-act { display: inline; }
-.facet-opt-box:hover ~ .facet-opt-main .hint-act { display: none; }
-.facet-opt-box:hover ~ .facet-opt-main .hint-toggle { display: inline; }
-.facet-opt-main:hover .facet-opt-label { color: var(--text-primary); }
 
 .logs-main { position: relative; background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-lg); display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
 .logs-main-body { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }

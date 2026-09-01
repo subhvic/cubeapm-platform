@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, Res
 import { logRows, logVolume, logFacets, BASE_TIME } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
 import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue } from '@/components/QueryBuilder'
-import { flattenLeaves, newGroup, facetStates, setFacetFilter, facetFilterFor, clearFacets } from '@/utils/queryTree'
+import { flattenLeaves, newGroup } from '@/utils/queryTree'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
 import { serializePipes, composeQuery, parsePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
@@ -64,44 +64,14 @@ function VolumeTooltip({ active, payload, label }) {
 // Rows visible before the facet list starts scrolling.
 const FACET_VISIBLE_ROWS = 6
 
-function FacetOption({ field, option, on, sole, onToggle, onOnly, onAll }) {
-  const act = sole ? 'All' : 'Only'
-  return (
-    <div className="facet-opt">
-      <label className="facet-opt-box" title={`${on ? 'Hide' : 'Show'} ${option.value}`}>
-        <input
-          type="checkbox"
-          checked={on}
-          onChange={() => onToggle(field, option.value)}
-          aria-label={`${on ? 'Hide' : 'Show'} ${option.value}`}
-        />
-      </label>
-      <button
-        type="button"
-        className="facet-opt-main"
-        onClick={() => (sole ? onAll(field) : onOnly(field, option.value))}
-        aria-label={sole ? `Show all ${field} values` : `Show only ${option.value}`}
-      >
-        <span className="facet-opt-label" title={option.value}>{option.value}</span>
-        <span className="facet-opt-hint" aria-hidden="true">
-          <span className="hint-toggle">Toggle</span>
-          <span className="hint-act">{act}</span>
-        </span>
-        <span className="facet-opt-count">{option.count.toLocaleString()}</span>
-      </button>
-    </div>
-  )
-}
-
 // 'chip'  — inline eye toggle riding on the "N selected" count.
 // 'link'  — separate text link on its own line under the meta row.
-function FacetGroup({ title, options, selected, onToggle, onOnly, onAll }) {
+function FacetGroup({ title, options, selected, onToggle, toggleVariant = 'chip' }) {
   const [open, setOpen] = useState(true)
   const [q, setQ] = useState('')
   const [onlySelected, setOnlySelected] = useState(false)
 
   const selectedCount = options.filter(o => selected.has(o.value)).length
-  const filtered = selectedCount < options.length
 
   // Unchecking the last value while filtered to selections would strand the user
   // on an empty list, so drop back to showing everything.
@@ -121,8 +91,11 @@ function FacetGroup({ title, options, selected, onToggle, onOnly, onAll }) {
           <div className="facet-meta">
             <div className="facet-meta-left">
               <span>{options.length} total ·</span>
-              {selectedCount === 0 ? (
-                <span>{selectedCount} selected</span>
+              {toggleVariant === 'link' || selectedCount === 0 ? (
+                // In the 'link' variant this count is just a label — the separate
+                // "Show selected only" link carries the action — so keep it black
+                // rather than brand-blue, which would imply it's clickable.
+                <span className={selectedCount ? (toggleVariant === 'link' ? 'facet-meta-count' : 'facet-meta-hi') : undefined}>{selectedCount} selected</span>
               ) : (
                 <button
                   type="button"
@@ -142,18 +115,28 @@ function FacetGroup({ title, options, selected, onToggle, onOnly, onAll }) {
                 </button>
               )}
             </div>
-            {filtered && (
+            {selectedCount > 0 && (
               <button
                 type="button"
                 className="facet-clear-btn-meta"
-                title={`Show all ${options.length} ${title} values again`}
-                onClick={(e) => { e.stopPropagation(); onAll(title) }}
+                title="Clear selected"
+                onClick={(e) => { e.stopPropagation(); [...selected].forEach(v => onToggle(title, v)) }}
               >
                 <span>Clear</span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
             )}
           </div>
+          {toggleVariant === 'link' && selectedCount > 0 && open && (
+            <button
+              type="button"
+              className="facet-sel-link"
+              aria-pressed={onlySelected}
+              onClick={(e) => { e.stopPropagation(); setOpen(true); setOnlySelected(v => !v) }}
+            >
+              {onlySelected ? 'Show all' : 'Show selected only'}
+            </button>
+          )}
         </div>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={`facet-chev${open ? ' open' : ''}`}><path d="M6 9l6 6 6-6"/></svg>
       </div>
@@ -165,16 +148,11 @@ function FacetGroup({ title, options, selected, onToggle, onOnly, onAll }) {
           <div className={`facet-list${scrollable ? ' scrollable' : ''}`}>
             {shown.length === 0 && <div className="facet-none">No values match</div>}
             {shown.map(o => (
-              <FacetOption
-                key={o.value}
-                field={title}
-                option={o}
-                on={selected.has(o.value)}
-                sole={selectedCount === 1 && selected.has(o.value)}
-                onToggle={onToggle}
-                onOnly={onOnly}
-                onAll={onAll}
-              />
+              <label key={o.value} className="facet-opt">
+                <input type="checkbox" checked={selected.has(o.value)} onChange={() => onToggle(title, o.value)} />
+                <span className="facet-opt-label" title={o.value}>{o.value}</span>
+                <span className="facet-opt-count">{o.count.toLocaleString()}</span>
+              </label>
             ))}
           </div>
         </>
@@ -392,6 +370,15 @@ const LOOKS_LIKE_QUERY = /[:(]|!=|!~|\s(?:AND|OR|in|not_in)\s/i
 // Leading facets in the order someone reaches for them — what happened, then
 // who it happened to. Anything else the data turns up follows, alphabetically,
 // so a new tag appears in the panel without being named here.
+// Reads a facet's value off a row. `log.level` and `service` are properties of
+// the row itself; every other facet is a tag. Mirrors how the facet lists are
+// counted in observability.js, so a tick matches exactly the rows it counted.
+function facetValueOf(row, field) {
+  if (field === 'log.level') return row.level
+  if (field === 'service') return row.service
+  return row.tags?.[field]
+}
+
 const FACET_LEAD = ['log.level', 'service', 'http.status']
 
 const FILTERS_MIN_W = 232
@@ -1251,6 +1238,7 @@ export function LogRecordDrawer({
 }
 
 export default function LogsView({ goHome, timeRange, setTimeRange, setToast, onOpenLink, incomingChip, onIncomingChipApplied }) {
+  const [filters, setFilters] = useState({})
   const [selectedId, setSelectedId] = useState(null)
   const [query, setQuery] = useState('')
   const [chips, setChips] = useState([])
@@ -1789,64 +1777,22 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     document.body.style.userSelect = 'none'
   }, [filtersWidth])
 
-  // The panel reads its ticks out of the chips rather than keeping a parallel
-  // copy: one state, two views of it. It starts fully ticked because an empty
-  // query means "*", so what the chips record is what has been ruled *out* —
-  // a tick is simply the absence of an exclusion.
-  const facetState = useMemo(() => facetStates(chips), [chips])
-  const allValues = useCallback(
-    (field) => (logFacets[field] ?? []).map(o => String(o.value)), [])
-  const getSet = useCallback((field) => {
-    const st = facetState.get(field)
-    const all = allValues(field)
-    if (!st) return new Set(all)
-    return st.mode === 'include'
-      ? new Set(st.values)
-      : new Set(all.filter(v => !st.values.has(v)))
-  }, [facetState, allValues])
+  // The panel keeps its own selection, separate from the query bar's chips.
+  // An empty set means nothing is ruled out for that field, which is why the
+  // list starts unticked: no selection and every value selected would filter
+  // the same rows, and unticked is the one that leaves the query bar alone.
+  const toggleFilter = (group, value) => {
+    setFilters(prev => {
+      const next = { ...prev }
+      const set = new Set(next[group] || [])
+      if (set.has(value)) set.delete(value)
+      else set.add(value)
+      next[group] = set
+      return next
+    })
+  }
 
-  // A facet click is a direct manipulation, not an edit awaiting Run — so it
-  // applies immediately. Pipes are deliberately left where they are: clicking a
-  // filter should not also run a group-by someone was still assembling.
-  const applyFacetChips = useCallback((next) => {
-    setChips(next)
-    setAppliedChips(next)
-  }, [])
-
-  // Toggling keeps the field expressed the way it already was. Extending an
-  // exclusion by unticking a second value should read as one more thing ruled
-  // out, not silently flip the whole field into an inclusion list.
-  const toggleFilter = useCallback((field, value) => {
-    const all = allValues(field)
-    const next = new Set(getSet(field))
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-    const prefer = facetState.get(field)?.mode ?? 'exclude'
-    applyFacetChips(setFacetFilter(chips, field, facetFilterFor(next, all, prefer)))
-  }, [chips, applyFacetChips, allValues, getSet, facetState])
-
-  // The row body is the other half of the control: narrow to this value alone,
-  // or — when it is already alone — hand everything back. Deliberately written
-  // as an inclusion even where the same set is expressible as an exclusion,
-  // because "only error" is what was meant and what the chip should read as.
-  const onlyFilter = useCallback((field, value) => {
-    applyFacetChips(setFacetFilter(chips, field, { mode: 'include', values: [value] }))
-  }, [chips, applyFacetChips])
-
-  const allOfFilter = useCallback((field) => {
-    applyFacetChips(setFacetFilter(chips, field, null))
-  }, [chips, applyFacetChips])
-
-  const clearAllFacets = useCallback(() => {
-    applyFacetChips(clearFacets(chips))
-  }, [chips, applyFacetChips])
-
-  // What an alert would inherit: the values still in play on every field the
-  // panel has narrowed. Stated positively — a filter summary that listed what
-  // had been ruled out would read as the opposite of what it means.
-  const facetSummary = useMemo(() => Object.fromEntries(
-    [...facetState.keys()].map(field => [field, getSet(field)])
-  ), [facetState, getSet])
+  const getSet = key => filters[key] || new Set()
 
   const facetFields = useMemo(() => {
     const keys = Object.keys(logFacets)
@@ -1857,14 +1803,19 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
 
   // Rows matching chips/query/facets but NOT the time window — used to build the volume histogram.
   const chipFilteredRows = useMemo(() => {
-    // Facets are chips now, so applyChipsToLog below already applies them —
-    // filtering a second time here would be the same test run twice.
+    // Every facet the panel shows filters, not just the two it once listed:
+    // the field list is derived from the rows now, so naming fields here would
+    // leave the rest of the panel decorative.
+    const active = Object.entries(filters).filter(([, set]) => set?.size)
     return logRows.filter(l => {
+      for (const [field, set] of active) {
+        if (!set.has(String(facetValueOf(l, field) ?? ''))) return false
+      }
       if (query && !l.message.toLowerCase().includes(query.toLowerCase())) return false
       if (appliedChips.length && !applyChipsToLog(l, appliedChips)) return false
       return true
     })
-  }, [query, appliedChips])
+  }, [filters, query, appliedChips])
 
   // Literal strings the user is searching the message body for — the free-text
   // chips plus the facet search box. Regex chips are left out: their value is a
@@ -1954,7 +1905,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     // appliedChips, not chips — the chart must agree with the table, and in raw
     // mode `chips` is empty anyway (the active filter comes from parsed raw
     // text), which would short-circuit to the unfiltered baseline.
-    const hasFilters = appliedChips.length > 0 || !!query
+    const hasFilters = appliedChips.length > 0 || !!query || Object.values(filters).some(s => s?.size)
     if (!hasFilters) return logVolume
 
     const now = BASE_TIME.getTime()
@@ -1978,7 +1929,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       const error = all.error > 0 ? Math.round(d.error * filt.error / all.error) : 0
       return { ...d, info, warn, error, total: info + warn + error }
     })
-  }, [chipFilteredRows, query, appliedChips])
+  }, [chipFilteredRows, filters, query, appliedChips])
 
   const filtered = useMemo(() => {
     let rows = chipFilteredRows
@@ -2027,8 +1978,8 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       <div className="logs-filters">
         <div className="logs-filters-head">
           <span>Filters</span>
-          {facetState.size > 0 && (
-            <button className="logs-filters-clear" onClick={clearAllFacets}>Reset All</button>
+          {Object.values(filters).some(s => s?.size) && (
+            <button className="logs-filters-clear" onClick={() => setFilters({})}>Clear all</button>
           )}
         </div>
         {/* The facets scroll; the header does not, so "Clear all" stays reachable
@@ -2041,8 +1992,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
               options={logFacets[field]}
               selected={getSet(field)}
               onToggle={toggleFilter}
-              onOnly={onlyFilter}
-              onAll={allOfFilter}
+              toggleVariant={field === 'log.level' ? 'link' : 'chip'}
             />
           ))}
         </div>
@@ -2457,7 +2407,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       )}
       </div>
     </div>
-    {alertOpen && <AlertDrawer filters={facetSummary} query={query} onClose={() => setAlertOpen(false)} />}
+    {alertOpen && <AlertDrawer filters={filters} query={query} onClose={() => setAlertOpen(false)} />}
     {patternsOpen && <PatternsDrawer onClose={() => setPatternsOpen(false)} />}
     {historyOpen && (
       <QueryHistoryDrawer
