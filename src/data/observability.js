@@ -120,6 +120,48 @@ const FACET_MAX_VALUE_LEN = 60
 // every other facet leads with its most common value.
 const FACET_VALUE_ORDER = { 'log.level': ['error', 'warn', 'info'] }
 
+// A field whose every value is an identity - a uuid, a span id, a timestamp, an
+// opaque token - is not a filter. Picking one of its values selects the single
+// record you already had.
+//
+// This is a test on the SHAPE of the values, deliberately not on how many there
+// are. Counting cannot separate the two cases here: on the seeded rows both
+// `object.metadata.uid` and `object.reason` carry four distinct values across
+// the four rows that have them, so any ratio strict enough to drop the uuids
+// also drops SuccessfulCreate / BackOff, which is one of the more useful facets
+// on the page. The absolute cap above already handles the other direction, a
+// field with more values than anyone would scroll.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/
+const HEX_RUN = /^[0-9a-f]+$/i
+
+export function isIdentityValue(v) {
+  if (ISO_INSTANT.test(v)) return true
+  // A long unbroken hex run is a trace or span id.
+  if (v.length >= 16 && HEX_RUN.test(v)) return true
+  // A uuid, tested by composition rather than by the 8-4-4-4-12 layout: the
+  // seeded pod uids run a ten-character final group, and real telemetry carries
+  // malformed ids too. Enough hex once the dashes come out is the durable
+  // signal; the exact grouping is not.
+  const undashed = v.replace(/-/g, '')
+  if (undashed.length >= 24 && HEX_RUN.test(undashed)) return true
+  // An opaque token: long, unbroken, and drawing on upper, lower and digits at
+  // once. Real category names are shorter or carry a separator.
+  return v.length >= 24 && /^[A-Za-z0-9+/=_-]+$/.test(v)
+    && /[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v)
+}
+
+// Numbers need the count after all, because shape cannot tell a measurement
+// from a code: 200 and 24000000 are both just digits. What separates them is
+// that a status code repeats across rows and a duration does not, so a numeric
+// field is only rejected once nearly every row carrying it has its own value.
+// This is why `http.status` survives (3 values over 193 rows) and `duration`
+// does not (4 over 4).
+const MEASUREMENT_RATIO = 0.6
+
+export function isNumericValue(v) {
+  return /^-?\d+(\.\d+)?$/.test(v)
+}
+
 function buildLogFacets(rows) {
   const out = {}
   // Keys come from every row, not just the first. Records arrive in several
@@ -144,9 +186,12 @@ function buildLogFacets(rows) {
       const v = String(raw)
       counts.set(v, (counts.get(v) || 0) + 1)
     }
+    const values = [...counts.keys()]
     if (counts.size === 0 || counts.size > FACET_MAX_DISTINCT) continue
-    if ([...counts.keys()].some(v => v.length > FACET_MAX_VALUE_LEN)) continue
+    if (values.some(v => v.length > FACET_MAX_VALUE_LEN)) continue
     if (counts.size === 1 && populated === rows.length) continue
+    if (values.every(isIdentityValue)) continue
+    if (counts.size / populated >= MEASUREMENT_RATIO && values.every(isNumericValue)) continue
 
     const fixed = FACET_VALUE_ORDER[key]
     out[key] = [...counts.entries()]
