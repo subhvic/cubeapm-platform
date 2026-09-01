@@ -252,11 +252,13 @@ function formatHistoryTime(d) {
 // as free text instead of the filters the user actually saved.
 function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingNames }) {
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const inputRef = useRef(null)
 
   useEffect(() => {
     if (!open) return
     setName('')
+    setDescription('')
     // The field is the only thing in here; landing anywhere else costs a click.
     const t = setTimeout(() => inputRef.current?.focus(), 0)
     return () => clearTimeout(t)
@@ -266,7 +268,7 @@ function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingN
   const duplicate = existingNames.some(n => n.toLowerCase() === trimmed.toLowerCase())
   const submit = () => {
     if (!trimmed || duplicate) return
-    onSave(trimmed)
+    onSave(trimmed, description.trim())
     onClose()
   }
 
@@ -291,6 +293,20 @@ function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingN
             onChange={e => setName(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter') { e.preventDefault(); submit() }
+            }}
+          />
+        </label>
+        <label className="agg-field">
+          <span className="agg-lbl">Description <span className="sq-optional">optional</span></span>
+          <textarea
+            className="agg-input sq-textarea"
+            rows={2}
+            value={description}
+            placeholder="What is this for? When would you reach for it?"
+            onChange={e => setDescription(e.target.value)}
+            onKeyDown={e => {
+              // Enter submits from the name field; here it should make a line.
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() }
             }}
           />
         </label>
@@ -338,6 +354,7 @@ function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
           </button>
         )}
       </div>
+      {q.description && <div className="sq-item-desc">{q.description}</div>}
       <div className="qh-item-meta">
         <code className="qh-item-query">{composeQuery(chipsToString(q.chips), withImpliedCount(q.pipes || []))}</code>
       </div>
@@ -2015,16 +2032,32 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   //
   // Only the user's own saves count. The examples are a starting point, not
   // something they put there, so landing on one should still offer to keep it.
-  const savedAs = useMemo(() => {
-    if (!canSaveQuery) return null
-    return savedQueries.find(
-      q => composeQuery(chipsToString(q.chips ?? []), withImpliedCount(q.pipes ?? [])) === spelledQuery
-    ) ?? null
-  }, [savedQueries, spelledQuery, canSaveQuery])
+  const matchesQuery = useCallback(
+    (q) => composeQuery(chipsToString(q.chips ?? []), withImpliedCount(q.pipes ?? [])) === spelledQuery,
+    [spelledQuery]
+  )
 
-  const saveQuery = useCallback((name) => {
+  const savedAs = useMemo(
+    () => (canSaveQuery ? savedQueries.find(matchesQuery) ?? null : null),
+    [savedQueries, matchesQuery, canSaveQuery]
+  )
+
+  // The note under the bar answers "what am I looking at" after a query is
+  // applied from the panel, so it reads the examples too — those are the ones
+  // whose purpose is least obvious from the query itself.
+  //
+  // Derived from the query rather than set when one is applied: editing away
+  // should drop the note, because it would otherwise describe something that
+  // is no longer on screen.
+  const queryNote = useMemo(() => {
+    if (!canSaveQuery) return null
+    const hit = savedQueries.find(matchesQuery) ?? SAVED_QUERIES.find(matchesQuery)
+    return hit?.description ? hit : null
+  }, [savedQueries, matchesQuery, canSaveQuery])
+
+  const saveQuery = useCallback((name, description) => {
     setSavedQueries(prev => [
-      { id: `sq-${Date.now()}`, name, chips: effectiveChips, pipes },
+      { id: `sq-${Date.now()}`, name, description, chips: effectiveChips, pipes },
       ...prev,
     ])
     setToast?.(`Saved “${name}” to My Queries`)
@@ -2244,6 +2277,13 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
             )}
           </div>
         </div>
+
+        {queryNote && (
+          <div className="logs-query-note">
+            <span className="logs-query-note-name">{queryNote.name}</span>
+            <span className="logs-query-note-desc">{queryNote.description}</span>
+          </div>
+        )}
 
         <div className="pipe-toolbar">
           <PipePill

@@ -217,26 +217,26 @@ function buildFreeTextOptions(typed) {
 }
 
 export const SAVED_QUERIES = [
-  { name: 'Payments — errors last hour', chips: [
+  { name: 'Payments — errors last hour', description: 'Where a payment failure shows up first. Start here when checkout is reported broken.', chips: [
     { field: 'service',   op: 'eq', value: 'payment' },
     { field: 'log.level', op: 'eq', value: 'error' },
   ]},
-  { name: 'Server errors (5xx)', chips: [
+  { name: 'Server errors (5xx)', description: 'Everything the server itself failed to handle — excludes 4xx, which are the caller’s problem.', chips: [
     { field: 'http.status', op: 'prefix', value: '5' },
   ]},
-  { name: 'Payment path — anything matching', chips: [
+  { name: 'Payment path — anything matching', description: 'Every request touching a payment route, regardless of service or outcome.', chips: [
     { field: 'path', op: 'contains', value: 'payment' },
   ]},
-  { name: 'Connection failures', chips: [
+  { name: 'Connection failures', description: 'The pool could not reach a dependency. Usually the database, occasionally DNS.', chips: [
     { field: 'log.exception.type', op: 'eq', value: 'ConnectionRefusedException' },
   ]},
-  { name: 'Any exception raised', chips: [
+  { name: 'Any exception raised', description: 'Anything that threw, of any type — the widest net before narrowing by class.', chips: [
     { field: 'log.exception.type', op: 'exists' },
   ]},
-  { name: 'Payment or order services', chips: [
+  { name: 'Payment or order services', description: 'The two services that share the checkout path, so a fault in either surfaces together.', chips: [
     { field: 'service', op: 'in', value: ['payment', 'order'] },
   ]},
-  { name: 'Errors OR warnings only', chips: [
+  { name: 'Errors OR warnings only', description: 'Drops info, keeping the two levels that mean something needed attention.', chips: [
     { field: 'log.level', op: 'eq', value: 'error' },
     { field: 'log.level', op: 'eq', value: 'warn', connector: 'OR' },
   ]},

@@ -2758,6 +2758,18 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .agg-btn.is-primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
 .agg-btn:disabled { opacity: .5; cursor: not-allowed; }
 
+/* Sits between the bar and the pipes, so it reads as a caption on the query
+   rather than a banner over the page. Quiet by design: it explains what is
+   already running, it is not an alert. */
+.logs-query-note {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 0 14px 8px;
+}
+.logs-query-note-name {
+  flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--text-secondary);
+}
+.logs-query-note-desc { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+
 /* ---- Save query / My Queries ---- */
 .sq-preview {
   display: flex; flex-direction: column; gap: 4px;
@@ -2775,6 +2787,13 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
   color: var(--text-secondary); word-break: break-all; line-height: 1.5;
 }
 .sq-warn { font-size: 11px; color: var(--status-warning); }
+.sq-optional { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+/* Vertical padding rather than the input's centred line, and resizable only
+   downward so dragging it cannot break the popover's width. */
+.sq-textarea { padding: 7px 10px; line-height: 1.5; resize: vertical; min-height: 46px; }
+.sq-item-desc {
+  margin-top: 2px; font-size: 11.5px; line-height: 1.5; color: var(--text-secondary);
+}
 .sq-group {
   padding: 10px 14px 4px; font-size: 9.5px; font-weight: 600;
   letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted);
