@@ -64,9 +64,11 @@ function VolumeTooltip({ active, payload, label }) {
 // Rows visible before the facet list starts scrolling.
 const FACET_VISIBLE_ROWS = 6
 
-// 'chip'  — inline eye toggle riding on the "N selected" count.
-// 'link'  — separate text link on its own line under the meta row.
-function FacetGroup({ title, options, selected, onToggle, toggleVariant = 'chip' }) {
+// The "N selected" count doubles as the control that narrows the list to those
+// selections. One affordance for every facet: log.level used to carry a second,
+// text-link version of the same action, which made the panel's first group the
+// one place the interaction had to be learnt twice.
+function FacetGroup({ title, options, selected, onToggle }) {
   const [open, setOpen] = useState(true)
   const [q, setQ] = useState('')
   const [onlySelected, setOnlySelected] = useState(false)
@@ -91,11 +93,8 @@ function FacetGroup({ title, options, selected, onToggle, toggleVariant = 'chip'
           <div className="facet-meta">
             <div className="facet-meta-left">
               <span>{options.length} total ·</span>
-              {toggleVariant === 'link' || selectedCount === 0 ? (
-                // In the 'link' variant this count is just a label — the separate
-                // "Show selected only" link carries the action — so keep it black
-                // rather than brand-blue, which would imply it's clickable.
-                <span className={selectedCount ? (toggleVariant === 'link' ? 'facet-meta-count' : 'facet-meta-hi') : undefined}>{selectedCount} selected</span>
+              {selectedCount === 0 ? (
+                <span>{selectedCount} selected</span>
               ) : (
                 <button
                   type="button"
@@ -127,16 +126,6 @@ function FacetGroup({ title, options, selected, onToggle, toggleVariant = 'chip'
               </button>
             )}
           </div>
-          {toggleVariant === 'link' && selectedCount > 0 && open && (
-            <button
-              type="button"
-              className="facet-sel-link"
-              aria-pressed={onlySelected}
-              onClick={(e) => { e.stopPropagation(); setOpen(true); setOnlySelected(v => !v) }}
-            >
-              {onlySelected ? 'Show all' : 'Show selected only'}
-            </button>
-          )}
         </div>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={`facet-chev${open ? ' open' : ''}`}><path d="M6 9l6 6 6-6"/></svg>
       </div>
@@ -1992,7 +1981,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
               options={logFacets[field]}
               selected={getSet(field)}
               onToggle={toggleFilter}
-              toggleVariant={field === 'log.level' ? 'link' : 'chip'}
             />
           ))}
         </div>
