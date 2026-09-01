@@ -17,7 +17,7 @@ import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
 import PipePopover from '@/components/PipePopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus, BookmarkCheck } from 'lucide-react'
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
@@ -2009,6 +2009,19 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   // not worth a name, so neither can be saved.
   const canSaveQuery = queryMode !== 'raw' && (effectiveChips.length > 0 || livePipes.length > 0)
 
+  // Whether what is on screen has already been saved. Compared on the composed
+  // query rather than the name, because the question the button answers is
+  // "have I kept this one", not "is there something called this".
+  //
+  // Only the user's own saves count. The examples are a starting point, not
+  // something they put there, so landing on one should still offer to keep it.
+  const savedAs = useMemo(() => {
+    if (!canSaveQuery) return null
+    return savedQueries.find(
+      q => composeQuery(chipsToString(q.chips ?? []), withImpliedCount(q.pipes ?? [])) === spelledQuery
+    ) ?? null
+  }, [savedQueries, spelledQuery, canSaveQuery])
+
   const saveQuery = useCallback((name) => {
     setSavedQueries(prev => [
       { id: `sq-${Date.now()}`, name, chips: effectiveChips, pipes },
@@ -2333,15 +2346,17 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
           <div className="pipe-toolbar-right">
             <button
               ref={saveQueryBtnRef}
-              className={`pipe-btn is-icon${saveQueryOpen ? ' is-active' : ''}`}
-              disabled={!canSaveQuery}
-              title={canSaveQuery
-                ? 'Save query'
-                : 'Add a filter or a pipe first — there is nothing to save yet'}
-              aria-label="Save query"
+              className={`pipe-btn is-icon${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
+              disabled={!canSaveQuery || !!savedAs}
+              title={savedAs
+                ? `Saved as “${savedAs.name}”`
+                : canSaveQuery
+                  ? 'Save query'
+                  : 'Add a filter or a pipe first — there is nothing to save yet'}
+              aria-label={savedAs ? `Saved as ${savedAs.name}` : 'Save query'}
               onClick={() => setSaveQueryOpen(o => !o)}
             >
-              <BookmarkPlus strokeWidth={2} />
+              {savedAs ? <BookmarkCheck strokeWidth={2} /> : <BookmarkPlus strokeWidth={2} />}
             </button>
             <button
               ref={myQueriesBtnRef}
