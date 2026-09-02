@@ -27,9 +27,13 @@ function SvgIcon({ name }) {
  * Kept as a wrapper — pages author their breadcrumb content as children,
  * which lets each page keep its own trail shape (including selects like
  * InfraView's host picker) without any restructuring here.
+ *
+ * `actions` is the same idea for the right-hand side: a page can put its own
+ * controls ahead of the shared ones without this file learning what they are.
  */
 export default function PageBar({
   children,
+  actions,
   timeRange,
   setTimeRange,
   showSettings = false,
@@ -54,6 +58,7 @@ export default function PageBar({
     <div className="card-crumbs">
       <div className="card-crumbs-left">{children}</div>
       <div className="card-crumbs-right">
+        {actions}
         <button className="hbtn icon" title="Refresh now" aria-label="Refresh"><SvgIcon name="refresh" /></button>
         <div style={{ position: 'relative' }} ref={timeBtnRef}>
           <button

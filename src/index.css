@@ -2304,17 +2304,17 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
    justify-content, so the pills keep their own left-to-right rhythm and only
    this group is pushed away; when the toolbar wraps, the pair travels to the
    new row together instead of splitting. */
-.pipe-toolbar-right { display: flex; align-items: center; margin-left: auto; }
-.pipe-toolbar-right .pipe-btn { position: relative; }
-.pipe-toolbar-right .pipe-btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.query-actions { display: flex; align-items: center; }
+.query-actions .pipe-btn { position: relative; }
+.query-actions .pipe-btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 /* Pulled back a pixel so the two borders collapse into the one line between
    them rather than stacking into a 2px seam. */
-.pipe-toolbar-right .pipe-btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+.query-actions .pipe-btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
 /* Whichever button is lit owns the shared edge, so a hover or an open popover
    draws a whole border instead of three sides and a neighbour's leftover. */
-.pipe-toolbar-right .pipe-btn:hover:not(:disabled),
-.pipe-toolbar-right .pipe-btn.is-active,
-.pipe-toolbar-right .pipe-btn.is-saved { z-index: 1; }
+.query-actions .pipe-btn:hover:not(:disabled),
+.query-actions .pipe-btn.is-active,
+.query-actions .pipe-btn.is-saved { z-index: 1; }
 
 /* The same shell as a pill, so the toolbar reads as one row of controls rather
    than two kinds of button sharing a line. These carry no add affordance, so

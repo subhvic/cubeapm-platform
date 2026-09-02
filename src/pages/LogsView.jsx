@@ -2262,7 +2262,35 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
 
   return (
     <>
-      <PageBar timeRange={timeRange} setTimeRange={wrappedSetTimeRange}>
+      <PageBar
+        timeRange={timeRange}
+        setTimeRange={wrappedSetTimeRange}
+        actions={
+          <div className="query-actions">
+            <button
+              ref={saveQueryBtnRef}
+              className={`pipe-btn is-icon${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
+              disabled={!canSaveQuery || !!savedAs}
+              title={savedAs
+                ? `Saved as “${savedAs.name}”`
+                : canSaveQuery
+                  ? 'Save query'
+                  : 'Add a filter or a pipe first — there is nothing to save yet'}
+              aria-label={savedAs ? `Saved as ${savedAs.name}` : 'Save query'}
+              onClick={() => setSaveQueryOpen(o => !o)}
+            >
+              {savedAs ? <BookmarkCheck strokeWidth={2} /> : <BookmarkPlus strokeWidth={2} />}
+            </button>
+            <button
+              ref={myQueriesBtnRef}
+              className={`pipe-btn${myQueriesOpen ? ' is-active' : ''}`}
+              onClick={() => setMyQueriesOpen(true)}
+            >
+              My Queries
+            </button>
+          </div>
+        }
+      >
         <a onClick={goHome}>CubeAPM</a>
         <span className="sep">/</span>
         <span className="current">Logs</span>
@@ -2468,31 +2496,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
             )}
           </PipePill>
 
-          {/* Pushed to the far end: these act on the whole query, not on one
-              stage of it, so they should not read as another pipe to add. */}
-          <div className="pipe-toolbar-right">
-            <button
-              ref={saveQueryBtnRef}
-              className={`pipe-btn is-icon${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
-              disabled={!canSaveQuery || !!savedAs}
-              title={savedAs
-                ? `Saved as “${savedAs.name}”`
-                : canSaveQuery
-                  ? 'Save query'
-                  : 'Add a filter or a pipe first — there is nothing to save yet'}
-              aria-label={savedAs ? `Saved as ${savedAs.name}` : 'Save query'}
-              onClick={() => setSaveQueryOpen(o => !o)}
-            >
-              {savedAs ? <BookmarkCheck strokeWidth={2} /> : <BookmarkPlus strokeWidth={2} />}
-            </button>
-            <button
-              ref={myQueriesBtnRef}
-              className={`pipe-btn${myQueriesOpen ? ' is-active' : ''}`}
-              onClick={() => setMyQueriesOpen(true)}
-            >
-              My Queries
-            </button>
-          </div>
         </div>
         <SaveQueryPopover
           anchorRef={saveQueryBtnRef}
