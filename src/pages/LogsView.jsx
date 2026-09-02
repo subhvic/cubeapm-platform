@@ -279,29 +279,52 @@ function Toggle({ checked, onChange, label }) {
 // saved query should put the builder back exactly as it was — a string would
 // have to be reparsed, and anything the parser cannot express would come back
 // as free text instead of the filters the user actually saved.
-function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingNames, timeRange }) {
+function SaveQueryPopover({
+  anchorRef, open, onClose, onSave, onUpdate, preview, existingNames, timeRange,
+  origin, previousQuery,
+}) {
+  // 'update' overwrites the query this one came from; 'new' keeps both. Offered
+  // as tabs rather than a checkbox because they are two different outcomes, and
+  // which one is wanted depends on whether the edit corrected the saved query
+  // or branched off it — something only the user knows.
+  const [tab, setTab] = useState('new')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [lockTime, setLockTime] = useState(false)
   const [defaultView, setDefaultView] = useState(false)
   const inputRef = useRef(null)
 
+  const updating = tab === 'update' && !!origin
+
+  // Opening picks the tab; changing tab reloads the fields under it. Update
+  // starts from what the origin already says, so the common case — fixing the
+  // query, keeping everything else — is no typing at all.
   useEffect(() => {
     if (!open) return
-    setName('')
-    setDescription('')
-    setLockTime(false)
-    setDefaultView(false)
+    setTab(origin ? 'update' : 'new')
+  }, [open, origin])
+
+  useEffect(() => {
+    if (!open) return
+    const from = tab === 'update' ? origin : null
+    setName(from?.name ?? '')
+    setDescription(from?.description ?? '')
+    setLockTime(!!from?.timeRange)
+    setDefaultView(!!from?.isDefault)
     // The field is the only thing in here; landing anywhere else costs a click.
     const t = setTimeout(() => inputRef.current?.focus(), 0)
     return () => clearTimeout(t)
-  }, [open])
+  }, [open, tab, origin])
 
   const trimmed = name.trim()
-  const duplicate = existingNames.some(n => n.toLowerCase() === trimmed.toLowerCase())
+  // Its own name is not a clash with itself.
+  const duplicate = existingNames.some(n =>
+    n.toLowerCase() === trimmed.toLowerCase()
+    && !(updating && n.toLowerCase() === (origin?.name ?? '').toLowerCase()))
   const submit = () => {
     if (!trimmed || duplicate) return
-    onSave(trimmed, description.trim(), { lockTime, defaultView })
+    if (updating) onUpdate(origin.id, trimmed, description.trim(), { lockTime, defaultView })
+    else onSave(trimmed, description.trim(), { lockTime, defaultView })
     onClose()
   }
 
@@ -310,12 +333,36 @@ function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingN
       anchorRef={anchorRef}
       open={open}
       onClose={onClose}
-      title="Save query"
-      subtitle="Keeps the filters and pipes as they are now"
+      title={updating ? 'Update query' : 'Save query'}
+      subtitle={updating
+        ? 'Replaces the saved filters and pipes with these'
+        : 'Keeps the filters and pipes as they are now'}
       align="right"
       width={320}
     >
       <div className="agg-form">
+        {origin && (
+          <div className="sq-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'update'}
+              className={`sq-tab${tab === 'update' ? ' is-active' : ''}`}
+              onClick={() => setTab('update')}
+            >
+              Update Query
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'new'}
+              className={`sq-tab${tab === 'new' ? ' is-active' : ''}`}
+              onClick={() => setTab('new')}
+            >
+              Save as New
+            </button>
+          </div>
+        )}
         <label className="agg-field">
           <span className="agg-lbl">Name</span>
           <input
@@ -371,15 +418,24 @@ function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingN
           </div>
         </div>
 
-        <div className="sq-preview">
-          <span className="sq-preview-label">Saving</span>
-          <code>{preview}</code>
-        </div>
+        {updating && previousQuery && previousQuery !== preview ? (
+          <div className="sq-preview">
+            <span className="sq-preview-label">Replacing</span>
+            <code className="sq-was">{previousQuery}</code>
+            <span className="sq-preview-label">With</span>
+            <code>{preview}</code>
+          </div>
+        ) : (
+          <div className="sq-preview">
+            <span className="sq-preview-label">Saving</span>
+            <code>{preview}</code>
+          </div>
+        )}
         {duplicate && <div className="sq-warn">A query called “{trimmed}” already exists.</div>}
         <div className="agg-actions">
           <button type="button" className="agg-btn" onClick={onClose}>Cancel</button>
           <button type="button" className="agg-btn is-primary" disabled={!trimmed || duplicate} onClick={submit}>
-            Save
+            {updating ? 'Update' : 'Save'}
           </button>
         </div>
       </div>
@@ -1710,6 +1766,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   const [myQueriesOpen, setMyQueriesOpen] = useState(false)
   const [saveQueryOpen, setSaveQueryOpen] = useState(false)
   const [savedQueries, setSavedQueries] = useState([])
+  const [originId, setOriginId] = useState(null)
   const myQueriesBtnRef = useRef(null)
   const saveQueryBtnRef = useRef(null)
   // Saved-query state disabled — kept for future restoration:
@@ -2110,6 +2167,24 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     [savedQueries, matchesQuery, canSaveQuery]
   )
 
+  // Where the query on screen came from. Not derivable from the query itself —
+  // once edited it matches nothing — so it is carried from the moment a saved
+  // query was opened or written.
+  const origin = useMemo(
+    () => savedQueries.find(q => q.id === originId) ?? null,
+    [savedQueries, originId]
+  )
+
+  // Offered only once the query has drifted from its origin. While it still
+  // matches, `savedAs` covers it and there is nothing to update.
+  const updatable = origin && !savedAs ? origin : null
+
+  // Emptying the bar ends the lineage: nothing is left that descended from
+  // anything. Any lesser edit keeps it.
+  useEffect(() => {
+    if (!canSaveQuery) setOriginId(null)
+  }, [canSaveQuery])
+
   // The note under the bar answers "what am I looking at" after a query is
   // applied from the panel, so it reads the examples too — those are the ones
   // whose purpose is least obvious from the query itself.
@@ -2119,8 +2194,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   // is no longer on screen.
   const queryNote = useMemo(() => {
     if (!canSaveQuery) return null
-    const hit = savedQueries.find(matchesQuery) ?? SAVED_QUERIES.find(matchesQuery)
-    return hit?.description ? hit : null
+    return savedQueries.find(matchesQuery) ?? SAVED_QUERIES.find(matchesQuery) ?? null
   }, [savedQueries, matchesQuery, canSaveQuery])
 
   // `lockTime` is the difference between saving a question and saving an
@@ -2144,7 +2218,27 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       entry,
       ...(defaultView ? prev.map(q => ({ ...q, isDefault: false })) : prev),
     ])
+    // What is on screen now descends from this entry, so editing it next offers
+    // to update it rather than only to save a third copy.
+    setOriginId(entry.id)
     setToast?.(`Saved “${name}” to My Queries`)
+  }, [effectiveChips, pipes, timeRange, setToast])
+
+  const updateQuery = useCallback((id, name, description, { lockTime, defaultView } = {}) => {
+    setSavedQueries(prev => prev.map(q => {
+      if (q.id !== id) return defaultView ? { ...q, isDefault: false } : q
+      return {
+        ...q,
+        name,
+        description,
+        chips: effectiveChips,
+        pipes,
+        timeRange: lockTime ? timeRange : null,
+        isDefault: !!defaultView,
+        updatedAt: Date.now(),
+      }
+    }))
+    setToast?.(`Updated “${name}”`)
   }, [effectiveChips, pipes, timeRange, setToast])
 
   // Reapplying runs it. A saved query is a destination, not a draft — landing
@@ -2161,11 +2255,15 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     // Only when it was locked. Otherwise the range on screen is the one the
     // user chose most recently, and overriding it would undo that silently.
     if (q.timeRange) setTimeRange?.(q.timeRange)
+    // Examples have no id, so opening one starts no lineage: there is nothing
+    // of the user's to update, only a new query to save.
+    setOriginId(q.id ?? null)
     setMyQueriesOpen(false)
   }, [setTimeRange])
 
   const deleteSavedQuery = useCallback((id) => {
     setSavedQueries(prev => prev.filter(q => q.id !== id))
+    setOriginId(prev => (prev === id ? null : prev))
   }, [])
 
   const copyQuery = useCallback(() => {
@@ -2398,7 +2496,9 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
         {queryNote && (
           <div className="logs-query-note">
             <span className="logs-query-note-name">{queryNote.name}</span>
-            <span className="logs-query-note-desc">{queryNote.description}</span>
+            {queryNote.description && (
+              <span className="logs-query-note-desc">{queryNote.description}</span>
+            )}
           </div>
         )}
 
@@ -2507,6 +2607,11 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
           preview={composedQuery}
           existingNames={savedQueries.map(q => q.name)}
           timeRange={timeRange}
+          origin={updatable}
+          onUpdate={updateQuery}
+          previousQuery={updatable
+            ? composeQuery(chipsToString(updatable.chips ?? []), withImpliedCount(updatable.pipes ?? []))
+            : null}
         />
         <AggregationPopover
           anchorRef={aggPillRef}

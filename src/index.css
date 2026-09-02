@@ -2783,6 +2783,25 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
   font-family: 'JetBrains Mono', monospace; font-size: 11px;
   color: var(--text-secondary); word-break: break-all; line-height: 1.5;
 }
+.sq-tabs {
+  display: flex; gap: 2px; padding: 2px;
+  background: var(--panel); border-radius: var(--radius-sm);
+}
+.sq-tab {
+  flex: 1; padding: 5px 8px; background: none; border: 1px solid transparent;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--text-muted); font-family: inherit; font-size: 11.5px; font-weight: 500;
+  cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+}
+.sq-tab:hover { color: var(--text-secondary); }
+.sq-tab.is-active {
+  background: var(--card); border-color: var(--border-subtle);
+  color: var(--text-primary); font-weight: 600;
+}
+/* Struck through, because the point of showing it is that it is going away. */
+.sq-was { color: var(--text-muted); text-decoration: line-through; }
+.sq-preview-label + .sq-was + .sq-preview-label { margin-top: 6px; }
+
 .sq-warn { font-size: 11px; color: var(--status-warning); }
 .sq-optional { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
 /* Vertical padding rather than the input's centred line, and resizable only
