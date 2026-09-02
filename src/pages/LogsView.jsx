@@ -17,7 +17,7 @@ import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
 import PipePopover from '@/components/PipePopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus, BookmarkCheck } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus, BookmarkCheck, List } from 'lucide-react'
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
@@ -2269,7 +2269,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
           <div className="query-actions">
             <button
               ref={saveQueryBtnRef}
-              className={`pipe-btn is-icon${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
+              className={`pipe-btn${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
               disabled={!canSaveQuery || !!savedAs}
               title={savedAs
                 ? `Saved as “${savedAs.name}”`
@@ -2280,12 +2280,14 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
               onClick={() => setSaveQueryOpen(o => !o)}
             >
               {savedAs ? <BookmarkCheck strokeWidth={2} /> : <BookmarkPlus strokeWidth={2} />}
+              {savedAs ? 'Saved' : 'Save Query'}
             </button>
             <button
               ref={myQueriesBtnRef}
               className={`pipe-btn${myQueriesOpen ? ' is-active' : ''}`}
               onClick={() => setMyQueriesOpen(true)}
             >
+              <List strokeWidth={2} />
               My Queries
             </button>
           </div>

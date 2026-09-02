@@ -2345,9 +2345,6 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
 }
 .pipe-btn.is-saved:disabled { opacity: 1; cursor: default; }
 .pipe-btn.is-saved:hover { background: var(--text-primary); border-color: var(--text-primary); color: var(--card); }
-/* Square, so an icon on its own sits centred rather than adrift in a slot cut
-   for a label. Matches the pill's height exactly. */
-.pipe-btn.is-icon { width: 30px; padding: 0; justify-content: center; }
 .pipe-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
 
 .pipe-pill {
