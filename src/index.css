@@ -2304,17 +2304,17 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
    justify-content, so the pills keep their own left-to-right rhythm and only
    this group is pushed away; when the toolbar wraps, the pair travels to the
    new row together instead of splitting. */
-.pipe-toolbar-right { display: flex; align-items: center; margin-left: auto; }
-.pipe-toolbar-right .pipe-btn { position: relative; }
-.pipe-toolbar-right .pipe-btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.query-actions { display: flex; align-items: center; }
+.query-actions .pipe-btn { position: relative; }
+.query-actions .pipe-btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 /* Pulled back a pixel so the two borders collapse into the one line between
    them rather than stacking into a 2px seam. */
-.pipe-toolbar-right .pipe-btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+.query-actions .pipe-btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
 /* Whichever button is lit owns the shared edge, so a hover or an open popover
    draws a whole border instead of three sides and a neighbour's leftover. */
-.pipe-toolbar-right .pipe-btn:hover:not(:disabled),
-.pipe-toolbar-right .pipe-btn.is-active,
-.pipe-toolbar-right .pipe-btn.is-saved { z-index: 1; }
+.query-actions .pipe-btn:hover:not(:disabled),
+.query-actions .pipe-btn.is-active,
+.query-actions .pipe-btn.is-saved { z-index: 1; }
 
 /* The same shell as a pill, so the toolbar reads as one row of controls rather
    than two kinds of button sharing a line. These carry no add affordance, so
@@ -2345,9 +2345,6 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
 }
 .pipe-btn.is-saved:disabled { opacity: 1; cursor: default; }
 .pipe-btn.is-saved:hover { background: var(--text-primary); border-color: var(--text-primary); color: var(--card); }
-/* Square, so an icon on its own sits centred rather than adrift in a slot cut
-   for a label. Matches the pill's height exactly. */
-.pipe-btn.is-icon { width: 30px; padding: 0; justify-content: center; }
 .pipe-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
 
 .pipe-pill {
@@ -2761,14 +2758,28 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 /* Sits between the bar and the pipes, so it reads as a caption on the query
    rather than a banner over the page. Quiet by design: it explains what is
    already running, it is not an alert. */
+/* In the page bar now, so the row's own padding places it — no padding of its
+   own to keep in step with the query bar's. */
 .logs-query-note {
-  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-  padding: 0 14px 8px;
+  display: grid; grid-template-columns: auto 1fr; align-items: center;
+  column-gap: 6px; row-gap: 0;
+  flex: 1; min-width: 0;
 }
-.logs-query-note-name {
-  flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--text-secondary);
+/* The breadcrumb box takes the filters panel's width, so the row's 14px gap
+   lands the note exactly on the query section's left edge — and follows it
+   when the panel is dragged. */
+.card-crumbs.has-note .card-crumbs-left {
+  flex: 0 0 var(--crumbs-note-offset); min-width: 0; overflow: hidden;
 }
-.logs-query-note-desc { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+/* A long description shortens rather than pushing the controls off the row. */
+.logs-query-note-desc {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.logs-query-note-star { width: 12px; height: 12px; color: var(--brand); fill: currentColor; }
+.logs-query-note-name { font-size: 12px; line-height: 1.2; font-weight: 600; color: var(--text-primary); }
+.logs-query-note-desc {
+  grid-column: 2; font-size: 11.5px; line-height: 1.35; color: var(--text-muted);
+}
 
 /* ---- Save query / My Queries ---- */
 .sq-preview {
@@ -2786,6 +2797,25 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
   font-family: 'JetBrains Mono', monospace; font-size: 11px;
   color: var(--text-secondary); word-break: break-all; line-height: 1.5;
 }
+.sq-tabs {
+  display: flex; gap: 2px; padding: 2px;
+  background: var(--panel); border-radius: var(--radius-sm);
+}
+.sq-tab {
+  flex: 1; padding: 5px 8px; background: none; border: 1px solid transparent;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--text-muted); font-family: inherit; font-size: 11.5px; font-weight: 500;
+  cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+}
+.sq-tab:hover { color: var(--text-secondary); }
+.sq-tab.is-active {
+  background: var(--card); border-color: var(--border-subtle);
+  color: var(--text-primary); font-weight: 600;
+}
+/* Struck through, because the point of showing it is that it is going away. */
+.sq-was { color: var(--text-muted); text-decoration: line-through; }
+.sq-preview-label + .sq-was + .sq-preview-label { margin-top: 6px; }
+
 .sq-warn { font-size: 11px; color: var(--status-warning); }
 .sq-optional { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
 /* Vertical padding rather than the input's centred line, and resizable only

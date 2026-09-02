@@ -27,9 +27,21 @@ function SvgIcon({ name }) {
  * Kept as a wrapper — pages author their breadcrumb content as children,
  * which lets each page keep its own trail shape (including selects like
  * InfraView's host picker) without any restructuring here.
+ *
+ * `actions` is the same idea for the right-hand side: a page can put its own
+ * controls ahead of the shared ones without this file learning what they are.
+ *
+ * `note` sits between the two. `noteOffset` is how far in it should start —
+ * Logs uses it to line the note up with the query section, past a filters
+ * panel the user can resize. The breadcrumb box takes that width so the note
+ * lands on the edge through the row's own gap, rather than by an offset that
+ * has to be kept in step with the layout's.
  */
 export default function PageBar({
   children,
+  actions,
+  note,
+  noteOffset,
   timeRange,
   setTimeRange,
   showSettings = false,
@@ -51,9 +63,14 @@ export default function PageBar({
   }, [timeOpen])
 
   return (
-    <div className="card-crumbs">
+    <div
+      className={`card-crumbs${note ? ' has-note' : ''}`}
+      style={note && noteOffset != null ? { '--crumbs-note-offset': `${noteOffset}px` } : undefined}
+    >
       <div className="card-crumbs-left">{children}</div>
+      {note}
       <div className="card-crumbs-right">
+        {actions}
         <button className="hbtn icon" title="Refresh now" aria-label="Refresh"><SvgIcon name="refresh" /></button>
         <div style={{ position: 'relative' }} ref={timeBtnRef}>
           <button
