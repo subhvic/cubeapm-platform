@@ -2758,10 +2758,22 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 /* Sits between the bar and the pipes, so it reads as a caption on the query
    rather than a banner over the page. Quiet by design: it explains what is
    already running, it is not an alert. */
+/* In the page bar now, so the row's own padding places it — no padding of its
+   own to keep in step with the query bar's. */
 .logs-query-note {
   display: grid; grid-template-columns: auto 1fr; align-items: center;
   column-gap: 6px; row-gap: 0;
-  padding: 10px 14px 0;
+  flex: 1; min-width: 0;
+}
+/* The breadcrumb box takes the filters panel's width, so the row's 14px gap
+   lands the note exactly on the query section's left edge — and follows it
+   when the panel is dragged. */
+.card-crumbs.has-note .card-crumbs-left {
+  flex: 0 0 var(--crumbs-note-offset); min-width: 0; overflow: hidden;
+}
+/* A long description shortens rather than pushing the controls off the row. */
+.logs-query-note-desc {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .logs-query-note-star { width: 12px; height: 12px; color: var(--brand); fill: currentColor; }
 .logs-query-note-name { font-size: 12px; line-height: 1.2; font-weight: 600; color: var(--text-primary); }

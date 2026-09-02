@@ -2363,6 +2363,18 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       <PageBar
         timeRange={timeRange}
         setTimeRange={wrappedSetTimeRange}
+        noteOffset={filtersWidth}
+        note={queryNote && (
+          <div className="logs-query-note">
+            <Star className="logs-query-note-star" strokeWidth={2} aria-hidden="true" />
+            <span className="logs-query-note-name">{queryNote.name}</span>
+            {queryNote.description && (
+              <span className="logs-query-note-desc" title={queryNote.description}>
+                {queryNote.description}
+              </span>
+            )}
+          </div>
+        )}
         actions={
           <div className="query-actions">
             <button
@@ -2427,15 +2439,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
 
       <div className="logs-main">
       <div className="logs-main-body">
-        {queryNote && (
-          <div className="logs-query-note">
-            <Star className="logs-query-note-star" strokeWidth={2} aria-hidden="true" />
-            <span className="logs-query-note-name">{queryNote.name}</span>
-            {queryNote.description && (
-              <span className="logs-query-note-desc">{queryNote.description}</span>
-            )}
-          </div>
-        )}
         <div className="logs-query-bar">
           <QueryBuilder
             chips={chips}
