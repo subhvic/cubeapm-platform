@@ -2,8 +2,8 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, ResponsiveContainer } from 'recharts'
 import { logRows, logVolume, logFacets, BASE_TIME } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
-import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue } from '@/components/QueryBuilder'
-import { flattenLeaves, newGroup, facetStates, setFacetFilter, facetFilterFor, clearFacets } from '@/utils/queryTree'
+import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldValue, SAVED_QUERIES } from '@/components/QueryBuilder'
+import { flattenLeaves, newGroup } from '@/utils/queryTree'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
 import { serializePipes, composeQuery, parsePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
@@ -16,7 +16,8 @@ import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon } from 'lucide-react'
+import PipePopover from '@/components/PipePopover'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus, BookmarkCheck } from 'lucide-react'
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
@@ -64,44 +65,16 @@ function VolumeTooltip({ active, payload, label }) {
 // Rows visible before the facet list starts scrolling.
 const FACET_VISIBLE_ROWS = 6
 
-function FacetOption({ field, option, on, sole, onToggle, onOnly, onAll }) {
-  const act = sole ? 'All' : 'Only'
-  return (
-    <div className="facet-opt">
-      <label className="facet-opt-box" title={`${on ? 'Hide' : 'Show'} ${option.value}`}>
-        <input
-          type="checkbox"
-          checked={on}
-          onChange={() => onToggle(field, option.value)}
-          aria-label={`${on ? 'Hide' : 'Show'} ${option.value}`}
-        />
-      </label>
-      <button
-        type="button"
-        className="facet-opt-main"
-        onClick={() => (sole ? onAll(field) : onOnly(field, option.value))}
-        aria-label={sole ? `Show all ${field} values` : `Show only ${option.value}`}
-      >
-        <span className="facet-opt-label" title={option.value}>{option.value}</span>
-        <span className="facet-opt-hint" aria-hidden="true">
-          <span className="hint-toggle">Toggle</span>
-          <span className="hint-act">{act}</span>
-        </span>
-        <span className="facet-opt-count">{option.count.toLocaleString()}</span>
-      </button>
-    </div>
-  )
-}
-
-// 'chip'  — inline eye toggle riding on the "N selected" count.
-// 'link'  — separate text link on its own line under the meta row.
-function FacetGroup({ title, options, selected, onToggle, onOnly, onAll }) {
+// The "N selected" count doubles as the control that narrows the list to those
+// selections. One affordance for every facet: log.level used to carry a second,
+// text-link version of the same action, which made the panel's first group the
+// one place the interaction had to be learnt twice.
+function FacetGroup({ title, options, selected, onToggle }) {
   const [open, setOpen] = useState(true)
   const [q, setQ] = useState('')
   const [onlySelected, setOnlySelected] = useState(false)
 
   const selectedCount = options.filter(o => selected.has(o.value)).length
-  const filtered = selectedCount < options.length
 
   // Unchecking the last value while filtered to selections would strand the user
   // on an empty list, so drop back to showing everything.
@@ -142,12 +115,12 @@ function FacetGroup({ title, options, selected, onToggle, onOnly, onAll }) {
                 </button>
               )}
             </div>
-            {filtered && (
+            {selectedCount > 0 && (
               <button
                 type="button"
                 className="facet-clear-btn-meta"
-                title={`Show all ${options.length} ${title} values again`}
-                onClick={(e) => { e.stopPropagation(); onAll(title) }}
+                title="Clear selected"
+                onClick={(e) => { e.stopPropagation(); [...selected].forEach(v => onToggle(title, v)) }}
               >
                 <span>Clear</span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -165,16 +138,11 @@ function FacetGroup({ title, options, selected, onToggle, onOnly, onAll }) {
           <div className={`facet-list${scrollable ? ' scrollable' : ''}`}>
             {shown.length === 0 && <div className="facet-none">No values match</div>}
             {shown.map(o => (
-              <FacetOption
-                key={o.value}
-                field={title}
-                option={o}
-                on={selected.has(o.value)}
-                sole={selectedCount === 1 && selected.has(o.value)}
-                onToggle={onToggle}
-                onOnly={onOnly}
-                onAll={onAll}
-              />
+              <label key={o.value} className="facet-opt">
+                <input type="checkbox" checked={selected.has(o.value)} onChange={() => onToggle(title, o.value)} />
+                <span className="facet-opt-label" title={o.value}>{o.value}</span>
+                <span className="facet-opt-count">{o.count.toLocaleString()}</span>
+              </label>
             ))}
           </div>
         </>
@@ -276,6 +244,221 @@ function formatHistoryTime(d) {
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
   return `${Math.floor(diff / 86400000)}d ago`
+}
+
+// Absolute, not "2h ago". The seeded history is anchored to the mock
+// BASE_TIME, but a saved query is stamped with the real clock, so a relative
+// figure would be measured against a clock that is not running.
+function formatSavedAt(ts) {
+  if (!ts) return null
+  return new Date(ts).toLocaleString(undefined, {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+// role="switch" rather than a styled checkbox: the control reports its own
+// state to a screen reader, and the visible label sits beside it as the
+// accessible name, so nothing here is an unlabelled shape.
+function Toggle({ checked, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={`sq-toggle${checked ? ' is-on' : ''}`}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="sq-toggle-knob" />
+    </button>
+  )
+}
+
+// Saving keeps the chips and pipes, not the string it renders to. Reapplying a
+// saved query should put the builder back exactly as it was — a string would
+// have to be reparsed, and anything the parser cannot express would come back
+// as free text instead of the filters the user actually saved.
+function SaveQueryPopover({ anchorRef, open, onClose, onSave, preview, existingNames, timeRange }) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [lockTime, setLockTime] = useState(false)
+  const [defaultView, setDefaultView] = useState(false)
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    setName('')
+    setDescription('')
+    setLockTime(false)
+    setDefaultView(false)
+    // The field is the only thing in here; landing anywhere else costs a click.
+    const t = setTimeout(() => inputRef.current?.focus(), 0)
+    return () => clearTimeout(t)
+  }, [open])
+
+  const trimmed = name.trim()
+  const duplicate = existingNames.some(n => n.toLowerCase() === trimmed.toLowerCase())
+  const submit = () => {
+    if (!trimmed || duplicate) return
+    onSave(trimmed, description.trim(), { lockTime, defaultView })
+    onClose()
+  }
+
+  return (
+    <PipePopover
+      anchorRef={anchorRef}
+      open={open}
+      onClose={onClose}
+      title="Save query"
+      subtitle="Keeps the filters and pipes as they are now"
+      align="right"
+      width={320}
+    >
+      <div className="agg-form">
+        <label className="agg-field">
+          <span className="agg-lbl">Name</span>
+          <input
+            ref={inputRef}
+            className="agg-input"
+            value={name}
+            placeholder="e.g. Checkout errors"
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); submit() }
+            }}
+          />
+        </label>
+        <label className="agg-field">
+          <span className="agg-lbl">Description <span className="sq-optional">optional</span></span>
+          <textarea
+            className="agg-input sq-textarea"
+            rows={2}
+            value={description}
+            placeholder="What is this for? When would you reach for it?"
+            onChange={e => setDescription(e.target.value)}
+            onKeyDown={e => {
+              // Enter submits from the name field; here it should make a line.
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() }
+            }}
+          />
+        </label>
+        <div className="sq-section">
+          <div className="sq-section-title">Time range</div>
+          <div className="sq-row">
+            <span className="sq-row-value">{timeRange}</span>
+            <div className="sq-row-ctl">
+              <Toggle checked={lockTime} onChange={setLockTime} label="Lock time" />
+              <span className="sq-row-label">Lock time</span>
+              <span
+                className="sq-help"
+                tabIndex={0}
+                role="note"
+                aria-label="Locked, the query reopens on this exact range. Unlocked, it uses whichever range is selected at the time."
+                title="Locked, the query reopens on this exact range. Unlocked, it uses whichever range is selected at the time."
+              >?</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="sq-section">
+          <div className="sq-row">
+            <div className="sq-row-text">
+              <div className="sq-section-title">Set as default view</div>
+              <div className="sq-row-sub">Make this the default view</div>
+            </div>
+            <Toggle checked={defaultView} onChange={setDefaultView} label="Set as default view" />
+          </div>
+        </div>
+
+        <div className="sq-preview">
+          <span className="sq-preview-label">Saving</span>
+          <code>{preview}</code>
+        </div>
+        {duplicate && <div className="sq-warn">A query called “{trimmed}” already exists.</div>}
+        <div className="agg-actions">
+          <button type="button" className="agg-btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="agg-btn is-primary" disabled={!trimmed || duplicate} onClick={submit}>
+            Save
+          </button>
+        </div>
+      </div>
+    </PipePopover>
+  )
+}
+
+// The seeded examples are listed alongside what the user has saved so the panel
+// is never empty on a first visit, but only their own are removable — deleting
+// a worked example out of a prototype leaves nothing to put back.
+function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
+  const [search, setSearch] = useState('')
+
+  const match = (q) => !search
+    || q.name.toLowerCase().includes(search.toLowerCase())
+    || chipsToString(q.chips).toLowerCase().includes(search.toLowerCase())
+
+  const mine = saved.filter(match)
+  const shown = examples.filter(match)
+
+  const Row = ({ q, onRemove }) => (
+    <div className="qh-item" onClick={() => onApply(q)}>
+      <div className="qh-item-top">
+        <span className="sq-item-name">{q.name}</span>
+        {onRemove && (
+          <button
+            className="sq-item-del"
+            title={`Delete “${q.name}”`}
+            aria-label={`Delete ${q.name}`}
+            onClick={(e) => { e.stopPropagation(); onRemove(q.id) }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        )}
+      </div>
+      {q.description && <div className="sq-item-desc">{q.description}</div>}
+      <div className="qh-item-meta">
+        <code className="qh-item-query">{composeQuery(chipsToString(q.chips), withImpliedCount(q.pipes || []))}</code>
+      </div>
+      {(q.timeRange || q.isDefault || q.savedAt) && (
+        <div className="sq-item-tags">
+          {q.timeRange && <span className="sq-tag">{q.timeRange}</span>}
+          {q.isDefault && <span className="sq-tag is-default">Default view</span>}
+          {q.savedAt && <span className="sq-item-saved">Saved {formatSavedAt(q.savedAt)}</span>}
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="alert-drawer-overlay" onClick={onClose}>
+      <aside className="alert-drawer qh-drawer" onClick={e => e.stopPropagation()}>
+        <div className="alert-drawer-head">
+          <div>
+            <div className="alert-drawer-title">My Queries</div>
+            <div className="alert-drawer-sub">Saved filters and pipes, ready to reapply</div>
+          </div>
+          <button className="log-detail-close" onClick={onClose} aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="qh-toolbar">
+          <div className="qh-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input placeholder="Search saved queries…" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="qh-list">
+          {mine.length === 0 && shown.length === 0 && (
+            <div className="qh-empty">No saved queries match your search</div>
+          )}
+          {mine.length > 0 && <div className="sq-group">Saved by you</div>}
+          {mine.map(q => <Row key={q.id} q={q} onRemove={onDelete} />)}
+          {shown.length > 0 && <div className="sq-group">Examples</div>}
+          {shown.map(q => <Row key={q.name} q={q} />)}
+        </div>
+      </aside>
+    </div>
+  )
 }
 
 function QueryHistoryDrawer({ onClose, onApply /*, savedNames, onToggleSave — disabled, kept for future restoration */ }) {
@@ -392,6 +575,15 @@ const LOOKS_LIKE_QUERY = /[:(]|!=|!~|\s(?:AND|OR|in|not_in)\s/i
 // Leading facets in the order someone reaches for them — what happened, then
 // who it happened to. Anything else the data turns up follows, alphabetically,
 // so a new tag appears in the panel without being named here.
+// Reads a facet's value off a row. `log.level` and `service` are properties of
+// the row itself; every other facet is a tag. Mirrors how the facet lists are
+// counted in observability.js, so a tick matches exactly the rows it counted.
+function facetValueOf(row, field) {
+  if (field === 'log.level') return row.level
+  if (field === 'service') return row.service
+  return row.tags?.[field]
+}
+
 const FACET_LEAD = ['log.level', 'service', 'http.status']
 
 const FILTERS_MIN_W = 232
@@ -1251,6 +1443,7 @@ export function LogRecordDrawer({
 }
 
 export default function LogsView({ goHome, timeRange, setTimeRange, setToast, onOpenLink, incomingChip, onIncomingChipApplied }) {
+  const [filters, setFilters] = useState({})
   const [selectedId, setSelectedId] = useState(null)
   const [query, setQuery] = useState('')
   const [chips, setChips] = useState([])
@@ -1514,6 +1707,11 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   const [alertOpen, setAlertOpen] = useState(false)
   const [patternsOpen, setPatternsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [myQueriesOpen, setMyQueriesOpen] = useState(false)
+  const [saveQueryOpen, setSaveQueryOpen] = useState(false)
+  const [savedQueries, setSavedQueries] = useState([])
+  const myQueriesBtnRef = useRef(null)
+  const saveQueryBtnRef = useRef(null)
   // Saved-query state disabled — kept for future restoration:
   //   const [historySaved, setHistorySaved] = useState(
   //     () => Object.fromEntries(QUERY_HISTORY.map(h => [h.id, h.saved]))
@@ -1789,64 +1987,22 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     document.body.style.userSelect = 'none'
   }, [filtersWidth])
 
-  // The panel reads its ticks out of the chips rather than keeping a parallel
-  // copy: one state, two views of it. It starts fully ticked because an empty
-  // query means "*", so what the chips record is what has been ruled *out* —
-  // a tick is simply the absence of an exclusion.
-  const facetState = useMemo(() => facetStates(chips), [chips])
-  const allValues = useCallback(
-    (field) => (logFacets[field] ?? []).map(o => String(o.value)), [])
-  const getSet = useCallback((field) => {
-    const st = facetState.get(field)
-    const all = allValues(field)
-    if (!st) return new Set(all)
-    return st.mode === 'include'
-      ? new Set(st.values)
-      : new Set(all.filter(v => !st.values.has(v)))
-  }, [facetState, allValues])
+  // The panel keeps its own selection, separate from the query bar's chips.
+  // An empty set means nothing is ruled out for that field, which is why the
+  // list starts unticked: no selection and every value selected would filter
+  // the same rows, and unticked is the one that leaves the query bar alone.
+  const toggleFilter = (group, value) => {
+    setFilters(prev => {
+      const next = { ...prev }
+      const set = new Set(next[group] || [])
+      if (set.has(value)) set.delete(value)
+      else set.add(value)
+      next[group] = set
+      return next
+    })
+  }
 
-  // A facet click is a direct manipulation, not an edit awaiting Run — so it
-  // applies immediately. Pipes are deliberately left where they are: clicking a
-  // filter should not also run a group-by someone was still assembling.
-  const applyFacetChips = useCallback((next) => {
-    setChips(next)
-    setAppliedChips(next)
-  }, [])
-
-  // Toggling keeps the field expressed the way it already was. Extending an
-  // exclusion by unticking a second value should read as one more thing ruled
-  // out, not silently flip the whole field into an inclusion list.
-  const toggleFilter = useCallback((field, value) => {
-    const all = allValues(field)
-    const next = new Set(getSet(field))
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-    const prefer = facetState.get(field)?.mode ?? 'exclude'
-    applyFacetChips(setFacetFilter(chips, field, facetFilterFor(next, all, prefer)))
-  }, [chips, applyFacetChips, allValues, getSet, facetState])
-
-  // The row body is the other half of the control: narrow to this value alone,
-  // or — when it is already alone — hand everything back. Deliberately written
-  // as an inclusion even where the same set is expressible as an exclusion,
-  // because "only error" is what was meant and what the chip should read as.
-  const onlyFilter = useCallback((field, value) => {
-    applyFacetChips(setFacetFilter(chips, field, { mode: 'include', values: [value] }))
-  }, [chips, applyFacetChips])
-
-  const allOfFilter = useCallback((field) => {
-    applyFacetChips(setFacetFilter(chips, field, null))
-  }, [chips, applyFacetChips])
-
-  const clearAllFacets = useCallback(() => {
-    applyFacetChips(clearFacets(chips))
-  }, [chips, applyFacetChips])
-
-  // What an alert would inherit: the values still in play on every field the
-  // panel has narrowed. Stated positively — a filter summary that listed what
-  // had been ruled out would read as the opposite of what it means.
-  const facetSummary = useMemo(() => Object.fromEntries(
-    [...facetState.keys()].map(field => [field, getSet(field)])
-  ), [facetState, getSet])
+  const getSet = key => filters[key] || new Set()
 
   const facetFields = useMemo(() => {
     const keys = Object.keys(logFacets)
@@ -1857,14 +2013,19 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
 
   // Rows matching chips/query/facets but NOT the time window — used to build the volume histogram.
   const chipFilteredRows = useMemo(() => {
-    // Facets are chips now, so applyChipsToLog below already applies them —
-    // filtering a second time here would be the same test run twice.
+    // Every facet the panel shows filters, not just the two it once listed:
+    // the field list is derived from the rows now, so naming fields here would
+    // leave the rest of the panel decorative.
+    const active = Object.entries(filters).filter(([, set]) => set?.size)
     return logRows.filter(l => {
+      for (const [field, set] of active) {
+        if (!set.has(String(facetValueOf(l, field) ?? ''))) return false
+      }
       if (query && !l.message.toLowerCase().includes(query.toLowerCase())) return false
       if (appliedChips.length && !applyChipsToLog(l, appliedChips)) return false
       return true
     })
-  }, [query, appliedChips])
+  }, [filters, query, appliedChips])
 
   // Literal strings the user is searching the message body for — the free-text
   // chips plus the facet search box. Regex chips are left out: their value is a
@@ -1906,23 +2067,106 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     [appliedPipes]
   )
 
-  // A preview of what the bar currently spells, so it tracks every edit instead
-  // of waiting for Run — it shows the query you are about to run, which is the
-  // one worth reading while you build it. The results deliberately lag behind.
-  const composedQuery = useMemo(
-    () => livePipes.length > 0 ? composeQuery(chipsToString(effectiveChips), livePipes) : '',
-    [effectiveChips, livePipes]
-  )
-
-  // What the bar currently spells, matching the generated-query preview exactly
-  // — copying hands over the query you can see, not the one behind the results.
-  // That also means the icon shows as soon as there is anything to copy.
-  const copyableQuery = useMemo(
+  // What the bar currently spells. Live, not applied: it tracks every edit
+  // rather than waiting for Run, because the query worth reading while you
+  // build it is the one you are about to run. The results deliberately lag.
+  //
+  // One expression feeds both the preview and the copy button, so the two can
+  // never disagree about what the query is.
+  const spelledQuery = useMemo(
     () => (queryMode === 'raw'
       ? rawText.trim()
       : composeQuery(chipsToString(effectiveChips), livePipes)),
     [queryMode, rawText, effectiveChips, livePipes]
   )
+
+  // The preview is always on screen. An empty bar is not the absence of a
+  // query, it is `*`, and saying so is the whole value of the strip: somewhere
+  // to read what will run that is in the same place every time you look.
+  const composedQuery = spelledQuery || '*'
+
+  // Copy stays gated on there being something to copy — handing over `*` would
+  // be handing over nothing.
+  const copyableQuery = spelledQuery
+
+  // Saving stores what the builder holds, not what it renders to — see
+  // SaveQueryPopover. Raw mode has no chips to store, and a query of `*` is
+  // not worth a name, so neither can be saved.
+  const canSaveQuery = queryMode !== 'raw' && (effectiveChips.length > 0 || livePipes.length > 0)
+
+  // Whether what is on screen has already been saved. Compared on the composed
+  // query rather than the name, because the question the button answers is
+  // "have I kept this one", not "is there something called this".
+  //
+  // Only the user's own saves count. The examples are a starting point, not
+  // something they put there, so landing on one should still offer to keep it.
+  const matchesQuery = useCallback(
+    (q) => composeQuery(chipsToString(q.chips ?? []), withImpliedCount(q.pipes ?? [])) === spelledQuery,
+    [spelledQuery]
+  )
+
+  const savedAs = useMemo(
+    () => (canSaveQuery ? savedQueries.find(matchesQuery) ?? null : null),
+    [savedQueries, matchesQuery, canSaveQuery]
+  )
+
+  // The note under the bar answers "what am I looking at" after a query is
+  // applied from the panel, so it reads the examples too — those are the ones
+  // whose purpose is least obvious from the query itself.
+  //
+  // Derived from the query rather than set when one is applied: editing away
+  // should drop the note, because it would otherwise describe something that
+  // is no longer on screen.
+  const queryNote = useMemo(() => {
+    if (!canSaveQuery) return null
+    const hit = savedQueries.find(matchesQuery) ?? SAVED_QUERIES.find(matchesQuery)
+    return hit?.description ? hit : null
+  }, [savedQueries, matchesQuery, canSaveQuery])
+
+  // `lockTime` is the difference between saving a question and saving an
+  // answer: locked keeps the window the query was written for, unlocked lets
+  // it follow whatever range is on screen when it is next opened.
+  //
+  // Only one query can be the default, so setting the flag clears it
+  // elsewhere rather than leaving two claims to the same slot.
+  const saveQuery = useCallback((name, description, { lockTime, defaultView } = {}) => {
+    const entry = {
+      id: `sq-${Date.now()}`,
+      savedAt: Date.now(),
+      name,
+      description,
+      chips: effectiveChips,
+      pipes,
+      timeRange: lockTime ? timeRange : null,
+      isDefault: !!defaultView,
+    }
+    setSavedQueries(prev => [
+      entry,
+      ...(defaultView ? prev.map(q => ({ ...q, isDefault: false })) : prev),
+    ])
+    setToast?.(`Saved “${name}” to My Queries`)
+  }, [effectiveChips, pipes, timeRange, setToast])
+
+  // Reapplying runs it. A saved query is a destination, not a draft — landing
+  // on the builder with the filters loaded but the old results still showing
+  // would be the one state nobody wants.
+  const applySavedQuery = useCallback((q) => {
+    const nextChips = q.chips ?? []
+    const nextPipes = q.pipes ?? []
+    setChips(nextChips)
+    setAppliedChips(nextChips)
+    setPipes(nextPipes)
+    setAppliedPipes(nextPipes)
+    setQuery('')
+    // Only when it was locked. Otherwise the range on screen is the one the
+    // user chose most recently, and overriding it would undo that silently.
+    if (q.timeRange) setTimeRange?.(q.timeRange)
+    setMyQueriesOpen(false)
+  }, [setTimeRange])
+
+  const deleteSavedQuery = useCallback((id) => {
+    setSavedQueries(prev => prev.filter(q => q.id !== id))
+  }, [])
 
   const copyQuery = useCallback(() => {
     if (!copyableQuery) return
@@ -1954,7 +2198,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     // appliedChips, not chips — the chart must agree with the table, and in raw
     // mode `chips` is empty anyway (the active filter comes from parsed raw
     // text), which would short-circuit to the unfiltered baseline.
-    const hasFilters = appliedChips.length > 0 || !!query
+    const hasFilters = appliedChips.length > 0 || !!query || Object.values(filters).some(s => s?.size)
     if (!hasFilters) return logVolume
 
     const now = BASE_TIME.getTime()
@@ -1978,7 +2222,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       const error = all.error > 0 ? Math.round(d.error * filt.error / all.error) : 0
       return { ...d, info, warn, error, total: info + warn + error }
     })
-  }, [chipFilteredRows, query, appliedChips])
+  }, [chipFilteredRows, filters, query, appliedChips])
 
   const filtered = useMemo(() => {
     let rows = chipFilteredRows
@@ -2027,8 +2271,8 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       <div className="logs-filters">
         <div className="logs-filters-head">
           <span>Filters</span>
-          {facetState.size > 0 && (
-            <button className="logs-filters-clear" onClick={clearAllFacets}>Reset All</button>
+          {Object.values(filters).some(s => s?.size) && (
+            <button className="logs-filters-clear" onClick={() => setFilters({})}>Clear all</button>
           )}
         </div>
         {/* The facets scroll; the header does not, so "Clear all" stays reachable
@@ -2041,8 +2285,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
               options={logFacets[field]}
               selected={getSet(field)}
               onToggle={toggleFilter}
-              onOnly={onlyFilter}
-              onAll={allOfFilter}
             />
           ))}
         </div>
@@ -2122,6 +2364,13 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
             )}
           </div>
         </div>
+
+        {queryNote && (
+          <div className="logs-query-note">
+            <span className="logs-query-note-name">{queryNote.name}</span>
+            <span className="logs-query-note-desc">{queryNote.description}</span>
+          </div>
+        )}
 
         <div className="pipe-toolbar">
           <PipePill
@@ -2218,7 +2467,42 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
               </PipePillChip>
             )}
           </PipePill>
+
+          {/* Pushed to the far end: these act on the whole query, not on one
+              stage of it, so they should not read as another pipe to add. */}
+          <div className="pipe-toolbar-right">
+            <button
+              ref={saveQueryBtnRef}
+              className={`pipe-btn is-icon${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
+              disabled={!canSaveQuery || !!savedAs}
+              title={savedAs
+                ? `Saved as “${savedAs.name}”`
+                : canSaveQuery
+                  ? 'Save query'
+                  : 'Add a filter or a pipe first — there is nothing to save yet'}
+              aria-label={savedAs ? `Saved as ${savedAs.name}` : 'Save query'}
+              onClick={() => setSaveQueryOpen(o => !o)}
+            >
+              {savedAs ? <BookmarkCheck strokeWidth={2} /> : <BookmarkPlus strokeWidth={2} />}
+            </button>
+            <button
+              ref={myQueriesBtnRef}
+              className={`pipe-btn${myQueriesOpen ? ' is-active' : ''}`}
+              onClick={() => setMyQueriesOpen(true)}
+            >
+              My Queries
+            </button>
+          </div>
         </div>
+        <SaveQueryPopover
+          anchorRef={saveQueryBtnRef}
+          open={saveQueryOpen}
+          onClose={() => setSaveQueryOpen(false)}
+          onSave={saveQuery}
+          preview={composedQuery}
+          existingNames={savedQueries.map(q => q.name)}
+          timeRange={timeRange}
+        />
         <AggregationPopover
           anchorRef={aggPillRef}
           open={aggPopOpen}
@@ -2274,12 +2558,10 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
           availableNames={mathAvailableNames}
         />
 
-        {composedQuery && (
-          <div className="logs-query-preview">
-            <span className="qb-preview-label">Generated Query</span>
-            <code className="qb-preview-code">{composedQuery}</code>
-          </div>
-        )}
+        <div className="logs-query-preview">
+          <span className="qb-preview-label">Generated Query</span>
+          <code className="qb-preview-code">{composedQuery}</code>
+        </div>
 
         <div className="logs-controls">
           <div className="logs-controls-left">
@@ -2457,8 +2739,17 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       )}
       </div>
     </div>
-    {alertOpen && <AlertDrawer filters={facetSummary} query={query} onClose={() => setAlertOpen(false)} />}
+    {alertOpen && <AlertDrawer filters={filters} query={query} onClose={() => setAlertOpen(false)} />}
     {patternsOpen && <PatternsDrawer onClose={() => setPatternsOpen(false)} />}
+    {myQueriesOpen && (
+      <MyQueriesDrawer
+        onClose={() => setMyQueriesOpen(false)}
+        saved={savedQueries}
+        examples={SAVED_QUERIES}
+        onApply={applySavedQuery}
+        onDelete={deleteSavedQuery}
+      />
+    )}
     {historyOpen && (
       <QueryHistoryDrawer
         onClose={() => setHistoryOpen(false)}

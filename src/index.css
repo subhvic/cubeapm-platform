@@ -1004,7 +1004,6 @@ tbody tr:hover { background: var(--panel-2); }
 .facet-title { font-size: 11.5px; font-weight: 600; color: var(--text-primary); font-family: 'JetBrains Mono', monospace; }
 .facet-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
 .facet-meta-left { display: flex; align-items: center; gap: 4px; }
-.facet-meta-hi { color: var(--brand); font-weight: 600; }
 /* 'link' variant: the count is a static label, not a control, so it reads in
    primary text rather than the brand-blue that would suggest it's clickable. */
 .facet-chev { width: 12px; height: 12px; color: var(--text-muted); transition: transform .12s; }
@@ -1041,31 +1040,11 @@ tbody tr:hover { background: var(--panel-2); }
 .facet-clear-btn-meta:hover { color: var(--text-primary); }
 .facet-clear-btn-meta svg { width: 10px; height: 10px; flex-shrink: 0; }
 /* 'link' variant — own line beneath the meta row, appears only once something is selected. */
-/* A facet row is two controls sharing one line: the checkbox toggles this one
-   value, the rest of the row narrows to it alone (or restores everything when
-   it is already alone). Neither half looks different from the other, so each
-   says what it does on hover — that label is the only thing separating a
-   checklist from a radio group. */
-.facet-opt { display: flex; align-items: center; font-size: 11px; }
+.facet-opt { display: flex; align-items: center; gap: 8px; padding: 4px 12px; cursor: pointer; font-size: 11px; }
 .facet-opt:hover { background: var(--panel-2); }
-.facet-opt-box { display: flex; align-items: center; padding: 4px 6px 4px 12px; cursor: pointer; flex-shrink: 0; }
-.facet-opt-box input { accent-color: var(--brand); display: block; cursor: pointer; }
-.facet-opt-main {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
-  padding: 4px 12px 4px 2px; background: none; border: 0; cursor: pointer;
-  font: inherit; text-align: left; color: inherit;
-}
+.facet-opt input { accent-color: var(--brand); flex-shrink: 0; }
 .facet-opt-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
 .facet-opt-count { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
-
-/* Both signifiers occupy the same slot and only one is ever shown, so the
-   count never shifts as the pointer crosses between the two halves. */
-.facet-opt-hint { flex-shrink: 0; font-size: 9.5px; letter-spacing: .02em; color: var(--text-muted); }
-.facet-opt-hint > span { display: none; }
-.facet-opt-main:hover .hint-act { display: inline; }
-.facet-opt-box:hover ~ .facet-opt-main .hint-act { display: none; }
-.facet-opt-box:hover ~ .facet-opt-main .hint-toggle { display: inline; }
-.facet-opt-main:hover .facet-opt-label { color: var(--text-primary); }
 
 .logs-main { position: relative; background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-lg); display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
 .logs-main-body { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
@@ -1684,7 +1663,7 @@ tbody tr:hover { background: var(--panel-2); }
 .logs-query-error-x:hover { opacity: 1; }
 .logs-query-error-x svg { width: 13px; height: 13px; }
 
-/* ── Generated query preview (visible only when pipes are active) ── */
+/* ── Generated query preview (always visible; reads `*` on an empty bar) ── */
 .logs-query-preview {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 16px;
@@ -2321,6 +2300,56 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
   padding: 4px 14px 14px;
 }
 
+/* Sits at the far end of the toolbar. `margin-left: auto` rather than
+   justify-content, so the pills keep their own left-to-right rhythm and only
+   this group is pushed away; when the toolbar wraps, the pair travels to the
+   new row together instead of splitting. */
+.pipe-toolbar-right { display: flex; align-items: center; margin-left: auto; }
+.pipe-toolbar-right .pipe-btn { position: relative; }
+.pipe-toolbar-right .pipe-btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+/* Pulled back a pixel so the two borders collapse into the one line between
+   them rather than stacking into a 2px seam. */
+.pipe-toolbar-right .pipe-btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+/* Whichever button is lit owns the shared edge, so a hover or an open popover
+   draws a whole border instead of three sides and a neighbour's leftover. */
+.pipe-toolbar-right .pipe-btn:hover:not(:disabled),
+.pipe-toolbar-right .pipe-btn.is-active,
+.pipe-toolbar-right .pipe-btn.is-saved { z-index: 1; }
+
+/* The same shell as a pill, so the toolbar reads as one row of controls rather
+   than two kinds of button sharing a line. These carry no add affordance, so
+   the padding is even where a pill's is weighted to leave room for its `+`. */
+.pipe-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 30px; padding: 2px 12px;
+  background: transparent; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted); font-family: inherit; font-size: 12.5px; font-weight: 500;
+  cursor: pointer; transition: background .12s, border-color .12s, color .12s;
+  user-select: none;
+}
+.pipe-btn:hover:not(:disabled) { background: var(--panel-2); border-color: var(--border-panel); color: var(--text-primary); }
+.pipe-btn.is-active { border-color: var(--brand); }
+.pipe-btn:disabled { opacity: .45; cursor: not-allowed; }
+/* Saved is an affirmation, not an unavailability — it happens to be
+   unclickable, but fading it would read as "you cannot save" rather than
+   "this is kept". Solid rather than outlined, so the one button in the row
+   that reports a state does not read as another button offering an action.
+   
+   --text-primary against --card inverts itself: near-black on white in the
+   light theme, near-white on near-black in the dark one, with no second rule
+   to keep in step. */
+.pipe-btn.is-saved {
+  background: var(--text-primary); border-color: var(--text-primary);
+  color: var(--card);
+}
+.pipe-btn.is-saved:disabled { opacity: 1; cursor: default; }
+.pipe-btn.is-saved:hover { background: var(--text-primary); border-color: var(--text-primary); color: var(--card); }
+/* Square, so an icon on its own sits centred rather than adrift in a slot cut
+   for a label. Matches the pill's height exactly. */
+.pipe-btn.is-icon { width: 30px; padding: 0; justify-content: center; }
+.pipe-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
 .pipe-pill {
   display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px;
   /* min-height rather than height: a pill wide enough to wrap its own chips
@@ -2728,6 +2757,104 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .agg-btn.is-primary { background: var(--brand); color: #fff; border-color: var(--brand); }
 .agg-btn.is-primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
 .agg-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Sits between the bar and the pipes, so it reads as a caption on the query
+   rather than a banner over the page. Quiet by design: it explains what is
+   already running, it is not an alert. */
+.logs-query-note {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 0 14px 8px;
+}
+.logs-query-note-name {
+  flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--text-secondary);
+}
+.logs-query-note-desc { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+
+/* ---- Save query / My Queries ---- */
+.sq-preview {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--panel); border: 1px solid var(--border-subtle);
+}
+.sq-preview-label {
+  font-size: 9.5px; font-weight: 600; letter-spacing: .5px;
+  text-transform: uppercase; color: var(--text-muted);
+}
+/* The query can be long and must not stretch the popover, so it wraps on any
+   character rather than overflowing. */
+.sq-preview code {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  color: var(--text-secondary); word-break: break-all; line-height: 1.5;
+}
+.sq-warn { font-size: 11px; color: var(--status-warning); }
+.sq-optional { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+/* Vertical padding rather than the input's centred line, and resizable only
+   downward so dragging it cannot break the popover's width. */
+.sq-textarea { padding: 7px 10px; line-height: 1.5; resize: vertical; min-height: 46px; }
+.sq-item-desc {
+  margin-top: 2px; font-size: 11.5px; line-height: 1.5; color: var(--text-secondary);
+}
+.sq-item-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.sq-tag {
+  padding: 2px 7px; border-radius: 2px; background: var(--panel-2);
+  font-size: 10px; font-weight: 500; color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace; white-space: nowrap;
+}
+.sq-tag.is-default { background: var(--brand-muted); color: var(--brand); font-family: inherit; }
+/* Pushed to the end of the row: it is the least actionable thing here, so it
+   should be the last thing the eye reaches. */
+.sq-item-saved { margin-left: auto; font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+
+/* ---- Save query: the two option blocks ---- */
+.sq-section {
+  padding: 10px; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.sq-section-title { font-size: 11.5px; font-weight: 600; color: var(--text-primary); }
+.sq-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sq-section-title + .sq-row { margin-top: 8px; }
+.sq-row-text { min-width: 0; }
+.sq-row-sub { margin-top: 1px; font-size: 11px; color: var(--text-muted); }
+.sq-row-value {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; color: var(--text-secondary);
+}
+.sq-row-ctl { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.sq-row-label { font-size: 11.5px; color: var(--text-secondary); }
+.sq-help {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 1px solid var(--border-strong); color: var(--text-muted);
+  font-size: 9px; font-weight: 600; cursor: help; user-select: none;
+}
+.sq-help:hover, .sq-help:focus-visible { color: var(--text-secondary); border-color: var(--text-muted); }
+
+/* Track and knob sized so the knob clears the track's border on both sides. */
+.sq-toggle {
+  position: relative; flex-shrink: 0; width: 28px; height: 16px; padding: 0;
+  border: 0; border-radius: 999px; background: var(--border-strong);
+  cursor: pointer; transition: background .14s;
+}
+.sq-toggle-knob {
+  position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--card);
+  transition: transform .14s;
+}
+.sq-toggle.is-on { background: var(--brand); }
+.sq-toggle.is-on .sq-toggle-knob { transform: translateX(12px); }
+.sq-toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.sq-group {
+  padding: 10px 14px 4px; font-size: 9.5px; font-weight: 600;
+  letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted);
+}
+.sq-item-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.sq-item-del {
+  display: inline-flex; padding: 2px; background: none; border: 0;
+  color: var(--text-muted); cursor: pointer; opacity: 0; transition: opacity .12s, color .12s;
+}
+.sq-item-del svg { width: 13px; height: 13px; }
+.qh-item:hover .sq-item-del { opacity: 1; }
+.sq-item-del:hover { color: var(--status-critical); }
 
 /* ============ Alert drawer ============ */
 .alert-drawer-overlay {
