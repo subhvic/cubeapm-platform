@@ -17,7 +17,7 @@ import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
 import PipePopover from '@/components/PipePopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus, BookmarkCheck, List } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus, BookmarkCheck, List, Star } from 'lucide-react'
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
@@ -2427,6 +2427,15 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
 
       <div className="logs-main">
       <div className="logs-main-body">
+        {queryNote && (
+          <div className="logs-query-note">
+            <Star className="logs-query-note-star" strokeWidth={2} aria-hidden="true" />
+            <span className="logs-query-note-name">{queryNote.name}</span>
+            {queryNote.description && (
+              <span className="logs-query-note-desc">{queryNote.description}</span>
+            )}
+          </div>
+        )}
         <div className="logs-query-bar">
           <QueryBuilder
             chips={chips}
@@ -2492,15 +2501,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
             )}
           </div>
         </div>
-
-        {queryNote && (
-          <div className="logs-query-note">
-            <span className="logs-query-note-name">{queryNote.name}</span>
-            {queryNote.description && (
-              <span className="logs-query-note-desc">{queryNote.description}</span>
-            )}
-          </div>
-        )}
 
         <div className="pipe-toolbar">
           <PipePill

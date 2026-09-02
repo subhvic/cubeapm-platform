@@ -2759,13 +2759,15 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
    rather than a banner over the page. Quiet by design: it explains what is
    already running, it is not an alert. */
 .logs-query-note {
-  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-  padding: 0 14px 8px;
+  display: grid; grid-template-columns: auto 1fr; align-items: center;
+  column-gap: 6px; row-gap: 1px;
+  padding: 10px 14px 0;
 }
-.logs-query-note-name {
-  flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--text-secondary);
+.logs-query-note-star { width: 12px; height: 12px; color: var(--brand); fill: currentColor; }
+.logs-query-note-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.logs-query-note-desc {
+  grid-column: 2; font-size: 11.5px; line-height: 1.45; color: var(--text-muted);
 }
-.logs-query-note-desc { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
 
 /* ---- Save query / My Queries ---- */
 .sq-preview {
