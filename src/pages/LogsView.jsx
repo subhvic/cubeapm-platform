@@ -2146,10 +2146,27 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   // be handing over nothing.
   const copyableQuery = spelledQuery
 
-  // Saving stores what the builder holds, not what it renders to — see
-  // SaveQueryPopover. Raw mode has no chips to store, and a query of `*` is
-  // not worth a name, so neither can be saved.
-  const canSaveQuery = queryMode !== 'raw' && (effectiveChips.length > 0 || livePipes.length > 0)
+  // The save controls read the query that has been RUN, not the one in the bar.
+  // Everything else on this surface splits the same way — the preview is live,
+  // the results lag behind Run — and saving belongs on the results side of that
+  // line: a query nobody has executed is one nobody has checked, and keeping it
+  // under a name is how an untested query becomes someone else's starting point.
+  //
+  // It also keeps the button honest. Enabled by the run query but saving the
+  // typed one would store something the user never saw results for.
+  const appliedQuery = useMemo(
+    () => composeQuery(chipsToString(appliedChips), effectivePipes),
+    [appliedChips, effectivePipes]
+  )
+
+  // Raw mode has no chips to store, and a query of `*` is not worth a name.
+  const canSaveQuery = queryMode !== 'raw' && (appliedChips.length > 0 || effectivePipes.length > 0)
+
+  // Two ways to have nothing to save, and they need different advice: an empty
+  // bar wants a filter, a composed-but-unrun one wants Run.
+  const composedButUnrun = !canSaveQuery
+    && queryMode !== 'raw'
+    && (effectiveChips.length > 0 || livePipes.length > 0)
 
   // Whether what is on screen has already been saved. Compared on the composed
   // query rather than the name, because the question the button answers is
@@ -2158,8 +2175,8 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   // Only the user's own saves count. The examples are a starting point, not
   // something they put there, so landing on one should still offer to keep it.
   const matchesQuery = useCallback(
-    (q) => composeQuery(chipsToString(q.chips ?? []), withImpliedCount(q.pipes ?? [])) === spelledQuery,
-    [spelledQuery]
+    (q) => composeQuery(chipsToString(q.chips ?? []), withImpliedCount(q.pipes ?? [])) === appliedQuery,
+    [appliedQuery]
   )
 
   const savedAs = useMemo(
@@ -2209,8 +2226,8 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       savedAt: Date.now(),
       name,
       description,
-      chips: effectiveChips,
-      pipes,
+      chips: appliedChips,
+      pipes: appliedPipes,
       timeRange: lockTime ? timeRange : null,
       isDefault: !!defaultView,
     }
@@ -2222,7 +2239,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     // to update it rather than only to save a third copy.
     setOriginId(entry.id)
     setToast?.(`Saved “${name}” to My Queries`)
-  }, [effectiveChips, pipes, timeRange, setToast])
+  }, [appliedChips, appliedPipes, timeRange, setToast])
 
   const updateQuery = useCallback((id, name, description, { lockTime, defaultView } = {}) => {
     setSavedQueries(prev => prev.map(q => {
@@ -2231,15 +2248,15 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
         ...q,
         name,
         description,
-        chips: effectiveChips,
-        pipes,
+        chips: appliedChips,
+        pipes: appliedPipes,
         timeRange: lockTime ? timeRange : null,
         isDefault: !!defaultView,
         updatedAt: Date.now(),
       }
     }))
     setToast?.(`Updated “${name}”`)
-  }, [effectiveChips, pipes, timeRange, setToast])
+  }, [appliedChips, appliedPipes, timeRange, setToast])
 
   // Reapplying runs it. A saved query is a destination, not a draft — landing
   // on the builder with the filters loaded but the old results still showing
@@ -2385,7 +2402,9 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
                 ? `Saved as “${savedAs.name}”`
                 : canSaveQuery
                   ? 'Save query'
-                  : 'Add a filter or a pipe first — there is nothing to save yet'}
+                  : composedButUnrun
+                    ? 'Run the query first — saving keeps the one you have run'
+                    : 'Add a filter or a pipe first — there is nothing to save yet'}
               aria-label={savedAs ? `Saved as ${savedAs.name}` : 'Save query'}
               onClick={() => setSaveQueryOpen(o => !o)}
             >
@@ -2607,7 +2626,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
           open={saveQueryOpen}
           onClose={() => setSaveQueryOpen(false)}
           onSave={saveQuery}
-          preview={composedQuery}
+          preview={appliedQuery || '*'}
           existingNames={savedQueries.map(q => q.name)}
           timeRange={timeRange}
           origin={updatable}
