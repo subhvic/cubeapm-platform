@@ -2839,10 +2839,20 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .sq-item-saved { margin-left: auto; font-size: 10px; color: var(--text-muted); white-space: nowrap; }
 
 
-.sq-group {
-  padding: 10px 14px 4px; font-size: 9.5px; font-weight: 600;
-  letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted);
+.sq-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 56px 32px; gap: 4px;
 }
+.sq-empty-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; margin-bottom: 8px; border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text-muted);
+}
+.sq-empty-icon svg { width: 19px; height: 19px; }
+.sq-empty-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.sq-empty-text { max-width: 260px; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+.sq-empty-text strong { font-weight: 600; color: var(--text-secondary); }
+
 .sq-item-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
 .sq-item-del {
   display: inline-flex; padding: 2px; background: none; border: 0;

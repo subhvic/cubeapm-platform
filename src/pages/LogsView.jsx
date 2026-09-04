@@ -17,7 +17,7 @@ import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
 import PipePopover from '@/components/PipePopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus, BookmarkCheck, List, Star } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, Bookmark, BookmarkPlus, BookmarkCheck, List, Star } from 'lucide-react'
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
@@ -410,7 +410,7 @@ function SaveQueryPopover({
 // The seeded examples are listed alongside what the user has saved so the panel
 // is never empty on a first visit, but only their own are removable — deleting
 // a worked example out of a prototype leaves nothing to put back.
-function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
+function MyQueriesDrawer({ onClose, saved, onApply, onDelete }) {
   const [search, setSearch] = useState('')
 
   const match = (q) => !search
@@ -418,7 +418,6 @@ function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
     || chipsToString(q.chips).toLowerCase().includes(search.toLowerCase())
 
   const mine = saved.filter(match)
-  const shown = examples.filter(match)
 
   const Row = ({ q, onRemove }) => (
     <div className="qh-item" onClick={() => onApply(q)}>
@@ -459,20 +458,31 @@ function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>
-        <div className="qh-toolbar">
-          <div className="qh-search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-            <input placeholder="Search saved queries…" value={search} onChange={e => setSearch(e.target.value)} />
+        {saved.length > 0 && (
+          <div className="qh-toolbar">
+            <div className="qh-search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input placeholder="Search saved queries…" value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
           </div>
-        </div>
+        )}
         <div className="qh-list">
-          {mine.length === 0 && shown.length === 0 && (
+          {/* Two different nothings: an empty shelf, and a search that found
+              none of what is on it. Only the first is worth explaining. */}
+          {saved.length === 0 ? (
+            <div className="sq-empty">
+              <span className="sq-empty-icon"><Bookmark strokeWidth={1.5} /></span>
+              <div className="sq-empty-title">No saved queries yet</div>
+              <p className="sq-empty-text">
+                Run a query you want to keep, then choose <strong>Save Query</strong>.
+                It comes back with its filters and pipes exactly as you left them.
+              </p>
+            </div>
+          ) : mine.length === 0 ? (
             <div className="qh-empty">No saved queries match your search</div>
+          ) : (
+            mine.map(q => <Row key={q.id} q={q} onRemove={onDelete} />)
           )}
-          {mine.length > 0 && <div className="sq-group">Saved by you</div>}
-          {mine.map(q => <Row key={q.id} q={q} onRemove={onDelete} />)}
-          {shown.length > 0 && <div className="sq-group">Examples</div>}
-          {shown.map(q => <Row key={q.name} q={q} />)}
         </div>
       </aside>
     </div>
@@ -2816,7 +2826,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       <MyQueriesDrawer
         onClose={() => setMyQueriesOpen(false)}
         saved={savedQueries}
-        examples={SAVED_QUERIES}
         onApply={applySavedQuery}
         onDelete={deleteSavedQuery}
       />
