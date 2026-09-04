@@ -2314,7 +2314,10 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
    draws a whole border instead of three sides and a neighbour's leftover. */
 .query-actions .pipe-btn:hover:not(:disabled),
 .query-actions .pipe-btn.is-active,
-.query-actions .pipe-btn.is-saved { z-index: 1; }
+.query-actions .pipe-btn.sq-save:not(:disabled):not(.is-saved) { color: var(--brand); }
+.pipe-btn.sq-save:not(:disabled):not(.is-saved):hover { color: var(--brand); border-color: var(--brand); }
+
+.pipe-btn.is-saved { z-index: 1; }
 
 /* The same shell as a pill, so the toolbar reads as one row of controls rather
    than two kinds of button sharing a line. These carry no add affordance, so
@@ -2339,6 +2342,9 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
    --text-primary against --card inverts itself: near-black on white in the
    light theme, near-white on near-black in the dark one, with no second rule
    to keep in step. */
+.pipe-btn.sq-save:not(:disabled):not(.is-saved) { color: var(--brand); }
+.pipe-btn.sq-save:not(:disabled):not(.is-saved):hover { color: var(--brand); border-color: var(--brand); }
+
 .pipe-btn.is-saved {
   background: var(--text-primary); border-color: var(--text-primary);
   color: var(--card);
@@ -2758,20 +2764,13 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 /* Sits between the bar and the pipes, so it reads as a caption on the query
    rather than a banner over the page. Quiet by design: it explains what is
    already running, it is not an alert. */
-/* In the page bar now, so the row's own padding places it — no padding of its
-   own to keep in step with the query bar's. */
 .logs-query-note {
   display: grid; grid-template-columns: auto 1fr; align-items: center;
   column-gap: 6px; row-gap: 0;
-  flex: 1; min-width: 0;
+  padding: 0 14px 8px;
 }
-/* The breadcrumb box takes the filters panel's width, so the row's 14px gap
-   lands the note exactly on the query section's left edge — and follows it
-   when the panel is dragged. */
-.card-crumbs.has-note .card-crumbs-left {
-  flex: 0 0 var(--crumbs-note-offset); min-width: 0; overflow: hidden;
-}
-/* A long description shortens rather than pushing the controls off the row. */
+/* Truncated in JS at 100 characters; the ellipsis is the belt to that braces,
+   for a single word longer than the column. */
 .logs-query-note-desc {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }

@@ -261,6 +261,19 @@ function formatSavedAt(ts) {
 // enough that the panel stays a list of queries rather than of essays.
 // `maxLength` alone stops typing but not every paste, so the value is cut on
 // the way into state as well.
+// The note is a caption on the query bar, not the place to read a description
+// in full — that is what the panel is for. Cut on a word where one is close, so
+// the tail is not a half-word plus an ellipsis.
+const NOTE_DESC_MAX = 100
+
+function truncate(text, max) {
+  const t = String(text ?? '')
+  if (t.length <= max) return t
+  const cut = t.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max - 20 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
 const DESCRIPTION_MAX = 500
 
 // Saving keeps the chips and pipes, not the string it renders to. Reapplying a
@@ -2330,23 +2343,11 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       <PageBar
         timeRange={timeRange}
         setTimeRange={wrappedSetTimeRange}
-        noteOffset={filtersWidth}
-        note={queryNote && (
-          <div className="logs-query-note">
-            <Star className="logs-query-note-star" strokeWidth={2} aria-hidden="true" />
-            <span className="logs-query-note-name">{queryNote.name}</span>
-            {queryNote.description && (
-              <span className="logs-query-note-desc" title={queryNote.description}>
-                {queryNote.description}
-              </span>
-            )}
-          </div>
-        )}
         actions={
           <div className="query-actions">
             <button
               ref={saveQueryBtnRef}
-              className={`pipe-btn${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
+              className={`pipe-btn sq-save${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
               disabled={!canSaveQuery || !!savedAs}
               title={savedAs
                 ? `Saved as “${savedAs.name}”`
@@ -2473,6 +2474,18 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
             )}
           </div>
         </div>
+
+        {queryNote && (
+          <div className="logs-query-note">
+            <Star className="logs-query-note-star" strokeWidth={2} aria-hidden="true" />
+            <span className="logs-query-note-name">{queryNote.name}</span>
+            {queryNote.description && (
+              <span className="logs-query-note-desc" title={queryNote.description}>
+                {truncate(queryNote.description, NOTE_DESC_MAX)}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="pipe-toolbar">
           <PipePill
