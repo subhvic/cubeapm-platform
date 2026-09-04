@@ -2314,7 +2314,12 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
    draws a whole border instead of three sides and a neighbour's leftover. */
 .query-actions .pipe-btn:hover:not(:disabled),
 .query-actions .pipe-btn.is-active,
-.query-actions .pipe-btn.is-saved { z-index: 1; }
+.query-actions .pipe-btn.sq-save:not(:disabled):not(.is-saved) { color: var(--brand); }
+.pipe-btn.sq-save:not(:disabled):not(.is-saved):hover {
+  color: var(--brand); border-color: var(--border-subtle);
+}
+
+.pipe-btn.is-saved { z-index: 1; }
 
 /* The same shell as a pill, so the toolbar reads as one row of controls rather
    than two kinds of button sharing a line. These carry no add affordance, so
@@ -2339,6 +2344,11 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
    --text-primary against --card inverts itself: near-black on white in the
    light theme, near-white on near-black in the dark one, with no second rule
    to keep in step. */
+.pipe-btn.sq-save:not(:disabled):not(.is-saved) { color: var(--brand); }
+.pipe-btn.sq-save:not(:disabled):not(.is-saved):hover {
+  color: var(--brand); border-color: var(--border-subtle);
+}
+
 .pipe-btn.is-saved {
   background: var(--text-primary); border-color: var(--text-primary);
   color: var(--card);
@@ -2758,27 +2768,17 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 /* Sits between the bar and the pipes, so it reads as a caption on the query
    rather than a banner over the page. Quiet by design: it explains what is
    already running, it is not an alert. */
-/* In the page bar now, so the row's own padding places it — no padding of its
-   own to keep in step with the query bar's. */
 .logs-query-note {
-  display: grid; grid-template-columns: auto 1fr; align-items: center;
-  column-gap: 6px; row-gap: 0;
-  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 14px 8px;
 }
-/* The breadcrumb box takes the filters panel's width, so the row's 14px gap
-   lands the note exactly on the query section's left edge — and follows it
-   when the panel is dragged. */
-.card-crumbs.has-note .card-crumbs-left {
-  flex: 0 0 var(--crumbs-note-offset); min-width: 0; overflow: hidden;
+.logs-query-note-icon { flex-shrink: 0; width: 12px; height: 12px; color: var(--brand); fill: currentColor; }
+.logs-query-note-name {
+  flex-shrink: 0; font-size: 12px; line-height: 1.35; font-weight: 600; color: var(--text-primary);
 }
-/* A long description shortens rather than pushing the controls off the row. */
 .logs-query-note-desc {
+  min-width: 0; font-size: 11.5px; line-height: 1.35; color: var(--text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.logs-query-note-star { width: 12px; height: 12px; color: var(--brand); fill: currentColor; }
-.logs-query-note-name { font-size: 12px; line-height: 1.2; font-weight: 600; color: var(--text-primary); }
-.logs-query-note-desc {
-  grid-column: 2; font-size: 11.5px; line-height: 1.35; color: var(--text-muted);
 }
 
 /* ---- Save query / My Queries ---- */
@@ -2839,10 +2839,20 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .sq-item-saved { margin-left: auto; font-size: 10px; color: var(--text-muted); white-space: nowrap; }
 
 
-.sq-group {
-  padding: 10px 14px 4px; font-size: 9.5px; font-weight: 600;
-  letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted);
+.sq-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 56px 32px; gap: 4px;
 }
+.sq-empty-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; margin-bottom: 8px; border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text-muted);
+}
+.sq-empty-icon svg { width: 19px; height: 19px; }
+.sq-empty-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.sq-empty-text { max-width: 260px; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+.sq-empty-text strong { font-weight: 600; color: var(--text-secondary); }
+
 .sq-item-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
 .sq-item-del {
   display: inline-flex; padding: 2px; background: none; border: 0;

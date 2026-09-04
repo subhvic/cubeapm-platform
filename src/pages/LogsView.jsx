@@ -17,7 +17,7 @@ import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
 import PipePopover from '@/components/PipePopover'
-import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, BookmarkPlus, BookmarkCheck, List, Star } from 'lucide-react'
+import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, ArrowUpRight, Filter as FilterIcon, Bookmark, BookmarkPlus, BookmarkCheck, List } from 'lucide-react'
 import { services } from '@/data/services'
 import {
   linkFor as resolveLink, highlightFields, fieldGroupsFor,
@@ -261,6 +261,19 @@ function formatSavedAt(ts) {
 // enough that the panel stays a list of queries rather than of essays.
 // `maxLength` alone stops typing but not every paste, so the value is cut on
 // the way into state as well.
+// The note is a caption on the query bar, not the place to read a description
+// in full — that is what the panel is for. Cut on a word where one is close, so
+// the tail is not a half-word plus an ellipsis.
+const NOTE_DESC_MAX = 100
+
+function truncate(text, max) {
+  const t = String(text ?? '')
+  if (t.length <= max) return t
+  const cut = t.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max - 20 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
 const DESCRIPTION_MAX = 500
 
 // Saving keeps the chips and pipes, not the string it renders to. Reapplying a
@@ -410,7 +423,7 @@ function SaveQueryPopover({
 // The seeded examples are listed alongside what the user has saved so the panel
 // is never empty on a first visit, but only their own are removable — deleting
 // a worked example out of a prototype leaves nothing to put back.
-function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
+function MyQueriesDrawer({ onClose, saved, onApply, onDelete }) {
   const [search, setSearch] = useState('')
 
   const match = (q) => !search
@@ -418,7 +431,6 @@ function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
     || chipsToString(q.chips).toLowerCase().includes(search.toLowerCase())
 
   const mine = saved.filter(match)
-  const shown = examples.filter(match)
 
   const Row = ({ q, onRemove }) => (
     <div className="qh-item" onClick={() => onApply(q)}>
@@ -459,20 +471,31 @@ function MyQueriesDrawer({ onClose, saved, examples, onApply, onDelete }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>
-        <div className="qh-toolbar">
-          <div className="qh-search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-            <input placeholder="Search saved queries…" value={search} onChange={e => setSearch(e.target.value)} />
+        {saved.length > 0 && (
+          <div className="qh-toolbar">
+            <div className="qh-search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input placeholder="Search saved queries…" value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
           </div>
-        </div>
+        )}
         <div className="qh-list">
-          {mine.length === 0 && shown.length === 0 && (
+          {/* Two different nothings: an empty shelf, and a search that found
+              none of what is on it. Only the first is worth explaining. */}
+          {saved.length === 0 ? (
+            <div className="sq-empty">
+              <span className="sq-empty-icon"><Bookmark strokeWidth={1.5} /></span>
+              <div className="sq-empty-title">No saved queries yet</div>
+              <p className="sq-empty-text">
+                Run a query you want to keep, then choose <strong>Save Query</strong>.
+                It comes back with its filters and pipes exactly as you left them.
+              </p>
+            </div>
+          ) : mine.length === 0 ? (
             <div className="qh-empty">No saved queries match your search</div>
+          ) : (
+            mine.map(q => <Row key={q.id} q={q} onRemove={onDelete} />)
           )}
-          {mine.length > 0 && <div className="sq-group">Saved by you</div>}
-          {mine.map(q => <Row key={q.id} q={q} onRemove={onDelete} />)}
-          {shown.length > 0 && <div className="sq-group">Examples</div>}
-          {shown.map(q => <Row key={q.name} q={q} />)}
         </div>
       </aside>
     </div>
@@ -2320,23 +2343,11 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       <PageBar
         timeRange={timeRange}
         setTimeRange={wrappedSetTimeRange}
-        noteOffset={filtersWidth}
-        note={queryNote && (
-          <div className="logs-query-note">
-            <Star className="logs-query-note-star" strokeWidth={2} aria-hidden="true" />
-            <span className="logs-query-note-name">{queryNote.name}</span>
-            {queryNote.description && (
-              <span className="logs-query-note-desc" title={queryNote.description}>
-                {queryNote.description}
-              </span>
-            )}
-          </div>
-        )}
         actions={
           <div className="query-actions">
             <button
               ref={saveQueryBtnRef}
-              className={`pipe-btn${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
+              className={`pipe-btn sq-save${savedAs ? ' is-saved' : ''}${saveQueryOpen ? ' is-active' : ''}`}
               disabled={!canSaveQuery || !!savedAs}
               title={savedAs
                 ? `Saved as “${savedAs.name}”`
@@ -2463,6 +2474,18 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
             )}
           </div>
         </div>
+
+        {queryNote && (
+          <div className="logs-query-note">
+            <Bookmark className="logs-query-note-icon" strokeWidth={2} aria-hidden="true" />
+            <span className="logs-query-note-name">{queryNote.name}</span>
+            {queryNote.description && (
+              <span className="logs-query-note-desc" title={queryNote.description}>
+                {truncate(queryNote.description, NOTE_DESC_MAX)}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="pipe-toolbar">
           <PipePill
@@ -2816,7 +2839,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       <MyQueriesDrawer
         onClose={() => setMyQueriesOpen(false)}
         saved={savedQueries}
-        examples={SAVED_QUERIES}
         onApply={applySavedQuery}
         onDelete={deleteSavedQuery}
       />
