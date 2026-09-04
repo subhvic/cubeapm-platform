@@ -2315,7 +2315,9 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
 .query-actions .pipe-btn:hover:not(:disabled),
 .query-actions .pipe-btn.is-active,
 .query-actions .pipe-btn.sq-save:not(:disabled):not(.is-saved) { color: var(--brand); }
-.pipe-btn.sq-save:not(:disabled):not(.is-saved):hover { color: var(--brand); border-color: var(--brand); }
+.pipe-btn.sq-save:not(:disabled):not(.is-saved):hover {
+  color: var(--brand); border-color: var(--border-subtle);
+}
 
 .pipe-btn.is-saved { z-index: 1; }
 
@@ -2343,7 +2345,9 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
    light theme, near-white on near-black in the dark one, with no second rule
    to keep in step. */
 .pipe-btn.sq-save:not(:disabled):not(.is-saved) { color: var(--brand); }
-.pipe-btn.sq-save:not(:disabled):not(.is-saved):hover { color: var(--brand); border-color: var(--brand); }
+.pipe-btn.sq-save:not(:disabled):not(.is-saved):hover {
+  color: var(--brand); border-color: var(--border-subtle);
+}
 
 .pipe-btn.is-saved {
   background: var(--text-primary); border-color: var(--text-primary);
