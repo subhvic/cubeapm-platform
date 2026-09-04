@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server.browser'
 import { createElement } from 'react'
-import { LogRecordDrawer } from './LogsView.jsx'
+import { LogRecordDrawer } from '@/components/LogRecordDrawer'
 import { logRows } from '@/data/observability'
 import { recordType } from '@/utils/logFields'
 

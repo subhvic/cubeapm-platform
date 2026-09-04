@@ -26,6 +26,7 @@ export default [
       // Verbatim copies of src/ prepared for handoff. Linting them would double
       // every finding, and they are meant to match the originals byte for byte.
       'query-bar-package/**',
+      'log-record-drawer-package/**',
     ],
   },
 
