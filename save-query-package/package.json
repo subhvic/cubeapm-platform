@@ -1,0 +1,22 @@
+{
+  "name": "cubeapm-save-query",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CubeAPM save query — naming a query, keeping it, and knowing what the one on screen descends from. Extracted from the redesigned frontend for integration.",
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "esbuild": "^0.24.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16"
+  }
+}
