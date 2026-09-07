@@ -27,6 +27,7 @@ export default [
       // every finding, and they are meant to match the originals byte for byte.
       'query-bar-package/**',
       'log-record-drawer-package/**',
+      'save-query-package/**',
     ],
   },
 

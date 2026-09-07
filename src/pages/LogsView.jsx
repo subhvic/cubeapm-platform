@@ -6,7 +6,7 @@ import QueryBuilder, { applyChipsToLog, chipsToString, FIELD_CATALOG, getFieldVa
 import { flattenLeaves, newGroup } from '@/utils/queryTree'
 import { aggregate } from '@/utils/aggregator'
 import AggregateResults from '@/components/AggregateResults'
-import { serializePipes, composeQuery, parsePipes, newStatsPipe, newStatsFunction, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
+import { serializePipes, composeQuery, parsePipes, withImpliedCount, newStatsPipe, newSortPipe, newLimitPipe, newMathPipe, namesInScopeBefore } from '@/utils/pipes'
 import { tryParseConditions, splitQuery, replacePipeSection, validatePipeText } from '@/utils/rawQuery'
 import PipePill, { PipePillChip } from '@/components/PipePill'
 import AggregationPopover from '@/components/AggregationPopover'
@@ -14,7 +14,9 @@ import GroupByPopover from '@/components/GroupByPopover'
 import OrderPopover from '@/components/OrderPopover'
 import LimitPopover from '@/components/LimitPopover'
 import MathPopover from '@/components/MathPopover'
-import PipePopover from '@/components/PipePopover'
+import SaveQueryPopover from '@/components/SaveQueryPopover'
+import MyQueriesDrawer from '@/components/MyQueriesDrawer'
+import { useSavedQueries } from '@/hooks/useSavedQueries'
 import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, Bookmark, BookmarkPlus, BookmarkCheck, List } from 'lucide-react'
 import { ALIASES, isNoiseField } from '@/utils/logFields'
 import { escapeRegex, highlightTerms } from '@/utils/highlight'
@@ -242,16 +244,6 @@ function formatHistoryTime(d) {
   return `${Math.floor(diff / 86400000)}d ago`
 }
 
-// Absolute, not "2h ago". The seeded history is anchored to the mock
-// BASE_TIME, but a saved query is stamped with the real clock, so a relative
-// figure would be measured against a clock that is not running.
-function formatSavedAt(ts) {
-  if (!ts) return null
-  return new Date(ts).toLocaleString(undefined, {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
-}
 
 // Long enough for a paragraph explaining when to reach for a query, short
 // enough that the panel stays a list of queries rather than of essays.
@@ -270,233 +262,7 @@ function truncate(text, max) {
   return `${(space > max - 20 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
-const DESCRIPTION_MAX = 500
 
-// Saving keeps the chips and pipes, not the string it renders to. Reapplying a
-// saved query should put the builder back exactly as it was — a string would
-// have to be reparsed, and anything the parser cannot express would come back
-// as free text instead of the filters the user actually saved.
-function SaveQueryPopover({
-  anchorRef, open, onClose, onSave, onUpdate, preview, existingNames,
-  origin, previousQuery,
-}) {
-  // 'update' overwrites the query this one came from; 'new' keeps both. Offered
-  // as tabs rather than a checkbox because they are two different outcomes, and
-  // which one is wanted depends on whether the edit corrected the saved query
-  // or branched off it — something only the user knows.
-  const [tab, setTab] = useState('new')
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const inputRef = useRef(null)
-
-  const updating = tab === 'update' && !!origin
-
-  // Opening picks the tab; changing tab reloads the fields under it. Update
-  // starts from what the origin already says, so the common case — fixing the
-  // query, keeping everything else — is no typing at all.
-  useEffect(() => {
-    if (!open) return
-    setTab(origin ? 'update' : 'new')
-  }, [open, origin])
-
-  useEffect(() => {
-    if (!open) return
-    const from = tab === 'update' ? origin : null
-    setName(from?.name ?? '')
-    setDescription(from?.description ?? '')
-    // The field is the only thing in here; landing anywhere else costs a click.
-    const t = setTimeout(() => inputRef.current?.focus(), 0)
-    return () => clearTimeout(t)
-  }, [open, tab, origin])
-
-  const trimmed = name.trim()
-  // Its own name is not a clash with itself.
-  const duplicate = existingNames.some(n =>
-    n.toLowerCase() === trimmed.toLowerCase()
-    && !(updating && n.toLowerCase() === (origin?.name ?? '').toLowerCase()))
-  const submit = () => {
-    if (!trimmed || duplicate) return
-    if (updating) onUpdate(origin.id, trimmed, description.trim())
-    else onSave(trimmed, description.trim())
-    onClose()
-  }
-
-  return (
-    <PipePopover
-      anchorRef={anchorRef}
-      open={open}
-      onClose={onClose}
-      title={updating ? 'Update query' : 'Save query'}
-      subtitle={updating
-        ? 'Replaces the saved filters and pipes with these'
-        : 'Keeps the filters and pipes as they are now'}
-      align="right"
-      width={320}
-    >
-      <div className="agg-form">
-        {origin && (
-          <div className="sq-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'update'}
-              className={`sq-tab${tab === 'update' ? ' is-active' : ''}`}
-              onClick={() => setTab('update')}
-            >
-              Update Query
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'new'}
-              className={`sq-tab${tab === 'new' ? ' is-active' : ''}`}
-              onClick={() => setTab('new')}
-            >
-              Save as New
-            </button>
-          </div>
-        )}
-        <label className="agg-field">
-          <span className="agg-lbl">Name</span>
-          <input
-            ref={inputRef}
-            className="agg-input"
-            value={name}
-            placeholder="e.g. Checkout errors"
-            onChange={e => setName(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') { e.preventDefault(); submit() }
-            }}
-          />
-        </label>
-        <label className="agg-field">
-          <span className="agg-lbl">
-            Description <span className="sq-optional">optional</span>
-            {description.length > 0 && (
-              <span className={`sq-count${description.length >= DESCRIPTION_MAX ? ' is-full' : ''}`}>
-                {description.length}/{DESCRIPTION_MAX}
-              </span>
-            )}
-          </span>
-          <textarea
-            className="agg-input sq-textarea"
-            rows={2}
-            value={description}
-            maxLength={DESCRIPTION_MAX}
-            placeholder="What is this for? When would you reach for it?"
-            onChange={e => setDescription(e.target.value.slice(0, DESCRIPTION_MAX))}
-            onKeyDown={e => {
-              // Enter submits from the name field; here it should make a line.
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() }
-            }}
-          />
-        </label>
-        {updating && previousQuery && previousQuery !== preview ? (
-          <div className="sq-preview">
-            <span className="sq-preview-label">Replacing</span>
-            <code className="sq-was">{previousQuery}</code>
-            <span className="sq-preview-label">With</span>
-            <code>{preview}</code>
-          </div>
-        ) : (
-          <div className="sq-preview">
-            <span className="sq-preview-label">Saving</span>
-            <code>{preview}</code>
-          </div>
-        )}
-        {duplicate && <div className="sq-warn">A query called “{trimmed}” already exists.</div>}
-        <div className="agg-actions">
-          <button type="button" className="agg-btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="agg-btn is-primary" disabled={!trimmed || duplicate} onClick={submit}>
-            {updating ? 'Update' : 'Save'}
-          </button>
-        </div>
-      </div>
-    </PipePopover>
-  )
-}
-
-// The seeded examples are listed alongside what the user has saved so the panel
-// is never empty on a first visit, but only their own are removable — deleting
-// a worked example out of a prototype leaves nothing to put back.
-function MyQueriesDrawer({ onClose, saved, onApply, onDelete }) {
-  const [search, setSearch] = useState('')
-
-  const match = (q) => !search
-    || q.name.toLowerCase().includes(search.toLowerCase())
-    || chipsToString(q.chips).toLowerCase().includes(search.toLowerCase())
-
-  const mine = saved.filter(match)
-
-  const Row = ({ q, onRemove }) => (
-    <div className="qh-item" onClick={() => onApply(q)}>
-      <div className="qh-item-top">
-        <span className="sq-item-name">{q.name}</span>
-        {onRemove && (
-          <button
-            className="sq-item-del"
-            title={`Delete “${q.name}”`}
-            aria-label={`Delete ${q.name}`}
-            onClick={(e) => { e.stopPropagation(); onRemove(q.id) }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-          </button>
-        )}
-      </div>
-      {q.description && <div className="sq-item-desc">{q.description}</div>}
-      <div className="qh-item-meta">
-        <code className="qh-item-query">{composeQuery(chipsToString(q.chips), withImpliedCount(q.pipes || []))}</code>
-      </div>
-      {q.savedAt && (
-        <div className="sq-item-tags">
-          <span className="sq-item-saved">Saved {formatSavedAt(q.savedAt)}</span>
-        </div>
-      )}
-    </div>
-  )
-
-  return (
-    <div className="alert-drawer-overlay" onClick={onClose}>
-      <aside className="alert-drawer qh-drawer" onClick={e => e.stopPropagation()}>
-        <div className="alert-drawer-head">
-          <div>
-            <div className="alert-drawer-title">My Queries</div>
-            <div className="alert-drawer-sub">Saved filters and pipes, ready to reapply</div>
-          </div>
-          <button className="log-detail-close" onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
-        {saved.length > 0 && (
-          <div className="qh-toolbar">
-            <div className="qh-search">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-              <input placeholder="Search saved queries…" value={search} onChange={e => setSearch(e.target.value)} />
-            </div>
-          </div>
-        )}
-        <div className="qh-list">
-          {/* Two different nothings: an empty shelf, and a search that found
-              none of what is on it. Only the first is worth explaining. */}
-          {saved.length === 0 ? (
-            <div className="sq-empty">
-              <span className="sq-empty-icon"><Bookmark strokeWidth={1.5} /></span>
-              <div className="sq-empty-title">No saved queries yet</div>
-              <p className="sq-empty-text">
-                Run a query you want to keep, then choose <strong>Save Query</strong>.
-                It comes back with its filters and pipes exactly as you left them.
-              </p>
-            </div>
-          ) : mine.length === 0 ? (
-            <div className="qh-empty">No saved queries match your search</div>
-          ) : (
-            mine.map(q => <Row key={q.id} q={q} onRemove={onDelete} />)
-          )}
-        </div>
-      </aside>
-    </div>
-  )
-}
 
 function QueryHistoryDrawer({ onClose, onApply /*, savedNames, onToggleSave — disabled, kept for future restoration */ }) {
   const [search, setSearch] = useState('')
@@ -586,22 +352,6 @@ function presetToMinutes(tr) {
     return Math.round((now - sod) / 60000)
   }
   return map[tr] ?? null
-}
-
-// Grouping on its own is a complete question — "how many logs per service?" —
-// so an implied count() stands in until the user names a real aggregation.
-// Without it the aggregator has nothing to compute and returns empty, which
-// reads as "your grouping did nothing".
-//
-// Dirty-checking runs both sides through this too: serializeStats drops a stats
-// pipe that has no functions, so a group-by on its own would otherwise look
-// byte-identical to no pipes at all and never light up the Run button.
-function withImpliedCount(pipes) {
-  const stats = pipes.find(p => p.kind === 'stats')
-  if (!stats || stats.functions?.length || !stats.groupBy?.length) return pipes
-  return pipes.map(p => (
-    p.id === stats.id ? { ...p, functions: [{ ...newStatsFunction(), fn: 'count' }] } : p
-  ))
 }
 
 // Separates "a malformed query worth explaining" from "a plain value that
@@ -1006,8 +756,6 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
   const [historyOpen, setHistoryOpen] = useState(false)
   const [myQueriesOpen, setMyQueriesOpen] = useState(false)
   const [saveQueryOpen, setSaveQueryOpen] = useState(false)
-  const [savedQueries, setSavedQueries] = useState([])
-  const [originId, setOriginId] = useState(null)
   const myQueriesBtnRef = useRef(null)
   const saveQueryBtnRef = useRef(null)
   // Saved-query state disabled — kept for future restoration:
@@ -1400,90 +1148,10 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     [appliedChips, effectivePipes]
   )
 
-  // Raw mode has no chips to store, and a query of `*` is not worth a name.
-  const canSaveQuery = queryMode !== 'raw' && (appliedChips.length > 0 || effectivePipes.length > 0)
-
-  // Two ways to have nothing to save, and they need different advice: an empty
-  // bar wants a filter, a composed-but-unrun one wants Run.
-  const composedButUnrun = !canSaveQuery
-    && queryMode !== 'raw'
-    && (effectiveChips.length > 0 || livePipes.length > 0)
-
-  // Whether what is on screen has already been saved. Compared on the composed
-  // query rather than the name, because the question the button answers is
-  // "have I kept this one", not "is there something called this".
-  //
-  // Only the user's own saves count. The examples are a starting point, not
-  // something they put there, so landing on one should still offer to keep it.
-  const matchesQuery = useCallback(
-    (q) => composeQuery(chipsToString(q.chips ?? []), withImpliedCount(q.pipes ?? [])) === appliedQuery,
-    [appliedQuery]
-  )
-
-  const savedAs = useMemo(
-    () => (canSaveQuery ? savedQueries.find(matchesQuery) ?? null : null),
-    [savedQueries, matchesQuery, canSaveQuery]
-  )
-
-  // Where the query on screen came from. Not derivable from the query itself —
-  // once edited it matches nothing — so it is carried from the moment a saved
-  // query was opened or written.
-  const origin = useMemo(
-    () => savedQueries.find(q => q.id === originId) ?? null,
-    [savedQueries, originId]
-  )
-
-  // Offered only once the query has drifted from its origin. While it still
-  // matches, `savedAs` covers it and there is nothing to update.
-  const updatable = origin && !savedAs ? origin : null
-
-  // Emptying the bar ends the lineage: nothing is left that descended from
-  // anything. Any lesser edit keeps it.
-  useEffect(() => {
-    if (!canSaveQuery) setOriginId(null)
-  }, [canSaveQuery])
-
-  // The note under the bar answers "what am I looking at" after a query is
-  // applied from the panel, so it reads the examples too — those are the ones
-  // whose purpose is least obvious from the query itself.
-  //
-  // Derived from the query rather than set when one is applied: editing away
-  // should drop the note, because it would otherwise describe something that
-  // is no longer on screen.
-  const queryNote = useMemo(() => {
-    if (!canSaveQuery) return null
-    return savedQueries.find(matchesQuery) ?? SAVED_QUERIES.find(matchesQuery) ?? null
-  }, [savedQueries, matchesQuery, canSaveQuery])
-
-  const saveQuery = useCallback((name, description) => {
-    const entry = {
-      id: `sq-${Date.now()}`,
-      savedAt: Date.now(),
-      name,
-      description,
-      chips: appliedChips,
-      pipes: appliedPipes,
-    }
-    setSavedQueries(prev => [entry, ...prev])
-    // What is on screen now descends from this entry, so editing it next offers
-    // to update it rather than only to save a third copy.
-    setOriginId(entry.id)
-    setToast?.(`Saved “${name}” to My Queries`)
-  }, [appliedChips, appliedPipes, setToast])
-
-  const updateQuery = useCallback((id, name, description) => {
-    setSavedQueries(prev => prev.map(q => (
-      q.id === id
-        ? { ...q, name, description, chips: appliedChips, pipes: appliedPipes, updatedAt: Date.now() }
-        : q
-    )))
-    setToast?.(`Updated “${name}”`)
-  }, [appliedChips, appliedPipes, setToast])
-
-  // Reapplying runs it. A saved query is a destination, not a draft — landing
-  // on the builder with the filters loaded but the old results still showing
-  // would be the one state nobody wants.
-  const applySavedQuery = useCallback((q) => {
+  // The saved-query state machine lives in a hook: the rules are pure and
+  // tested in utils/savedQueries.js, and reading which of Save / Saved / Update
+  // is on offer off a render tree is how the wrong button ends up enabled.
+  const applySaved = useCallback((q) => {
     const nextChips = q.chips ?? []
     const nextPipes = q.pipes ?? []
     setChips(nextChips)
@@ -1491,16 +1159,24 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     setPipes(nextPipes)
     setAppliedPipes(nextPipes)
     setQuery('')
-    // Examples have no id, so opening one starts no lineage: there is nothing
-    // of the user's to update, only a new query to save.
-    setOriginId(q.id ?? null)
     setMyQueriesOpen(false)
   }, [])
 
-  const deleteSavedQuery = useCallback((id) => {
-    setSavedQueries(prev => prev.filter(q => q.id !== id))
-    setOriginId(prev => (prev === id ? null : prev))
-  }, [])
+  const {
+    saved: savedQueries, saveable: canSaveQuery, composedButUnrun,
+    savedAs, updatable, note: queryNote,
+    save: saveQuery, update: updateQuery, apply: applySavedQuery, remove: deleteSavedQuery,
+  } = useSavedQueries({
+    queryMode,
+    appliedChips, appliedPipes,
+    effectiveChips, effectivePipes, livePipes,
+    appliedQuery,
+    stringify: chipsToString,
+    examples: SAVED_QUERIES,
+    onToast: setToast,
+    onApply: applySaved,
+  })
+
 
   const copyQuery = useCallback(() => {
     if (!copyableQuery) return
