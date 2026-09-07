@@ -512,3 +512,19 @@ export function parsePipes(stages) {
     .map(p => (p.text.split(/[\s(]/)[0] || '').toLowerCase())
   return { ok: true, pipes, unsupported }
 }
+
+// Grouping on its own is a complete question — "how many logs per service?" —
+// so an implied count() stands in until the user names a real aggregation.
+// Without it the aggregator has nothing to compute and returns empty, which
+// reads as "your grouping did nothing".
+//
+// Dirty-checking runs both sides through this too: serializeStats drops a stats
+// pipe that has no functions, so a group-by on its own would otherwise look
+// byte-identical to no pipes at all and never light up the Run button.
+export function withImpliedCount(pipes) {
+  const stats = (pipes ?? []).find(p => p.kind === 'stats')
+  if (!stats || stats.functions?.length || !stats.groupBy?.length) return pipes
+  return pipes.map(p => (
+    p.id === stats.id ? { ...p, functions: [{ ...newStatsFunction(), fn: 'count' }] } : p
+  ))
+}
