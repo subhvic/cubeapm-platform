@@ -3,6 +3,8 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { services, serviceSummary, serviceEdges, externalDependencies, fleetSeries } from '@/data/services'
 import { statusForLatency, statusForErrorRate, statusColor } from '@/utils/status'
 import PageBar from '@/components/layout/PageBar'
+import { highlightTerms } from '@/utils/highlight'
+import TableSearch from '@/components/TableSearch'
 
 const BASE_TIME = new Date()
 
@@ -124,9 +126,39 @@ function Onboarding({ onDismiss }) {
 }
 
 function DetailTable({ onServiceClick }) {
+  const [search, setSearch] = useState('')
+  const term = search.trim()
+
+  // Filtering only removes rows, so severity order survives it — `services` is
+  // already sorted critical-first at the data layer, and a search must never be
+  // the thing that quietly reorders the list alphabetically.
+  const shown = useMemo(() => {
+    if (!term) return services
+    const q = term.toLowerCase()
+    return services.filter(s => s.name.toLowerCase().includes(q))
+  }, [term])
+
+  // The hint slot earns its keep either way: the sort rule when the whole list
+  // is showing, the count when it is not.
+  const hint = term
+    ? `${shown.length} of ${services.length} services`
+    : 'Sorted by severity - critical first'
+
   return (
     <div className="panel">
-      <div className="panel-head">All services <span className="hint">Sorted by severity - critical first</span></div>
+      <div className="panel-head is-stacked">
+        {/* Title and hint share the top row so the search below them can span
+            the panel's full width rather than stopping short of the hint. */}
+        <div className="panel-head-row">
+          <span>All services</span>
+          <span className="hint">{hint}</span>
+        </div>
+        <TableSearch
+          value={search}
+          onChange={setSearch}
+          placeholder="Search for service names"
+        />
+      </div>
       <table>
         <thead>
           <tr>
@@ -138,7 +170,14 @@ function DetailTable({ onServiceClick }) {
           </tr>
         </thead>
         <tbody>
-          {services.map(s => {
+          {shown.length === 0 && (
+            <tr className="svc-empty-row">
+              <td colSpan={5}>
+                No service matches “{term}”.
+              </td>
+            </tr>
+          )}
+          {shown.map(s => {
             const latS = statusForLatency(s.latencyP90)
             const errS = statusForErrorRate(s.errorRatePct)
             return (
@@ -146,7 +185,12 @@ function DetailTable({ onServiceClick }) {
                 <td>
                   <div className="svc-name">
                     <span className={`status-dot ${s.status}`} title={`Status: ${s.status}`} />
-                    {s.name}
+                    {/* One element whether highlighted or not: .svc-name is a
+                        flex row with a gap, so returning the name as several
+                        nodes would space each fragment apart. */}
+                    <span className="svc-name-text">
+                      {term ? highlightTerms(s.name, [term], 'svc-hit') : s.name}
+                    </span>
                     <span className="svc-lang">{s.language}</span>
                     <span className={`badge ${s.status}`}>{s.status}</span>
                   </div>
