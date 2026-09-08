@@ -535,6 +535,131 @@ a { color: inherit; }
 .view-toggle-btn:hover { color: var(--text-secondary); }
 .view-toggle-btn.active { background: var(--raised); color: var(--text-primary); }
 
+/* Title row above a full-width search. Scoped to this panel rather than
+   changing .panel-head globally — every other panel head in the app is a
+   single centred row and should stay that way. */
+.panel-head.is-stacked { flex-direction: column; align-items: stretch; gap: 9px; }
+.panel-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* Unfilled: the border alone carries the field, so it reads as part of the
+   panel head rather than as a control dropped onto it. */
+.svc-search {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%;
+  background: none; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); padding: 4px 9px;
+  font-weight: 400;
+  transition: border-color .12s;
+}
+.svc-search:focus-within { border-color: var(--border-strong); }
+.svc-search svg { width: 13px; height: 13px; flex-shrink: 0; color: var(--text-muted); }
+.svc-search input {
+  flex: 1; min-width: 0; background: none; border: none; outline: none;
+  color: var(--text-primary); font-family: inherit; font-size: 12px; font-weight: 400;
+}
+.svc-search input::placeholder { color: var(--text-muted); }
+.svc-search-clear {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--text-muted); flex-shrink: 0; border-radius: 3px;
+}
+.svc-search-clear:hover { color: var(--text-primary); }
+.svc-search-clear svg { width: 12px; height: 12px; }
+
+/* Outruns `td:first-child { text-align: left }`, which sits later in this
+   file at the same specificity. */
+tr.svc-empty-row td {
+  padding: 28px 16px; text-align: center;
+  color: var(--text-muted); font-size: 12px; white-space: normal;
+}
+.svc-empty-row:hover { background: none; }
+
+/* ── Pod search: the query field, its error line, and the syntax overlay ── */
+.pod-search-wrap { position: relative; }
+
+/* The field draws its text twice: a coloured layer, and a transparent input on
+   top of it holding the caret. Every metric below has to match between the two
+   or the copies drift apart as you type. */
+.pod-search-ink-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+.pod-search-ink,
+.pod-search-field input {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; line-height: 20px; letter-spacing: 0;
+  white-space: pre; padding: 0; border: 0;
+}
+.pod-search-ink {
+  position: absolute; inset: 0; overflow: hidden;
+  pointer-events: none; color: var(--text-primary);
+}
+.pod-search-field input {
+  flex: 1; min-width: 0; background: none; outline: none;
+  color: transparent; caret-color: var(--text-primary);
+}
+/* The placeholder has no ink layer behind it, so it paints itself. */
+.pod-search-field input::placeholder { color: var(--text-muted); font-family: inherit; }
+.pod-search-field input::selection { background: var(--brand-muted); color: transparent; }
+
+.pod-ink-field { color: var(--brand-on-muted); font-weight: 500; }
+.pod-ink-op    { color: var(--warning-fg); font-weight: 500; }
+.pod-ink-paren { color: var(--text-muted); }
+.pod-ink-plain { color: var(--text-primary); }
+
+.pod-search-run {
+  display: inline-flex; align-items: center; justify-content: center;
+  /* Matches the input's 20px line box, so the field keeps its height whether
+     the button is there or not. */
+  flex-shrink: 0; width: 20px; height: 20px; padding: 0;
+  background: var(--brand); border: none; border-radius: 4px;
+  cursor: pointer; transition: background-color .12s;
+}
+.pod-search-run:hover { filter: brightness(1.08); }
+/* `.svc-search svg` sets a muted colour on every icon in the field, and
+   stroke="currentColor" resolves against that — which paints this one grey on
+   blue. It has to be overridden here, on the svg itself. */
+.pod-search-run svg { width: 12px; height: 12px; color: #fff; stroke: #fff; }
+.svc-search.has-error { border-color: color-mix(in srgb, var(--critical) 55%, transparent); }
+.pod-search-error {
+  margin-top: 5px; font-size: 10.5px; color: var(--critical-fg); font-weight: 400;
+}
+
+.pod-search-overlay {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 300;
+  background: var(--raised); border: 1px solid var(--border-panel);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-dropdown);
+  overflow: hidden; font-weight: 400;
+}
+.pod-search-section { padding: 5px 0; }
+.pod-search-row {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  padding: 6px 12px; background: none; border: none; cursor: pointer;
+  font-family: inherit; text-align: left;
+}
+.pod-search-row:hover,
+.pod-search-row.hl { background: var(--panel-2); }
+.pod-search-row-main { font-size: 11.5px; color: var(--text-primary); flex-shrink: 0; }
+.pod-search-row-hint { font-size: 11px; color: var(--text-muted); }
+
+/* Legend rather than rows: these are syntax to read, not options to pick. */
+.pod-search-legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle); background: var(--panel);
+}
+.pod-search-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.pod-search-legend-lbl { font-size: 10.5px; color: var(--text-muted); }
+.pod-search-legend code {
+  font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+  color: var(--text-secondary);
+  background: var(--panel-2); border: 1px solid var(--border-subtle);
+  border-radius: 3px; padding: 1px 5px;
+}
+
+.pod-empty-row {
+  padding: 28px 16px; text-align: center;
+  color: var(--text-muted); font-size: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
 table { width: 100%; border-collapse: collapse; }
 thead th { border-top: 1px solid var(--border-subtle); }
 th {
@@ -549,6 +674,7 @@ td { padding: 11px 16px; border-top: 1px solid var(--border-subtle); text-align:
 tbody tr { cursor: pointer; transition: background .1s; }
 tbody tr:hover { background: var(--panel-2); }
 .svc-name { display: flex; align-items: center; gap: 11px; text-align: left; font-weight: 500; }
+.svc-name-text { min-width: 0; }
 .svc-lang { font-size: 10px; color: var(--text-muted); border: 1px solid var(--border-panel); border-radius: 3px; padding: 0 5px; text-transform: uppercase; letter-spacing: .3px; }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.critical { background: var(--critical); box-shadow: 0 0 0 3px rgba(239,68,68,.16); }
@@ -2240,7 +2366,7 @@ button.log-link-hint:focus-visible { outline: 2px solid var(--brand); outline-of
 .log-text, .log-detail-val, [data-log-field] { cursor: text; }
 /* Matched search text inside a log line. The tint carries the signal; the
    inherited colour keeps the line readable in either theme. */
-.log-hit {
+.log-hit, .svc-hit {
   background: var(--hit-tint); color: inherit;
   border-radius: 2px; padding: 0 1px;
 }

@@ -7,6 +7,9 @@ import {
   mysqlSummary, mysqlSeries, redisSummary, redisSeries,
 } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
+import TableQuerySearch from '@/components/TableQuerySearch'
+import { parsePodQuery, matchesPod, highlightsFor, POD_FIELDS, POD_NODE_FIELDS } from '@/utils/tableQuery'
+import { highlightTerms } from '@/utils/highlight'
 
 const BASE_TIME = new Date()
 
@@ -513,6 +516,19 @@ function K8sPodDetail({ pod }) {
 }
 
 function K8sNodeDetail({ node, onSelectPod }) {
+  const [podQuery, setPodQuery] = useState('')
+
+  const onNode = useMemo(() => k8sPods.filter(p => p.node === node.name), [node.name])
+
+  // A query that does not parse filters nothing: the row list should not empty
+  // itself while someone is halfway through typing an operator.
+  const { node: queryNode, ok } = parsePodQuery(podQuery)
+  const shown = useMemo(
+    () => (ok ? onNode.filter(p => matchesPod(queryNode, p)) : onNode),
+    [onNode, queryNode, ok],
+  )
+  const hits = useMemo(() => (ok ? highlightsFor(queryNode) : { pod: [], namespace: [] }), [queryNode, ok])
+
   return (
     <div>
       <div className="infra-row-charts">
@@ -541,14 +557,31 @@ function K8sNodeDetail({ node, onSelectPod }) {
       </div>
 
       <div className="panel">
-        <div className="panel-head">Pods <span className="hint">{node.pods} pods scheduled · click a row to inspect</span></div>
+        <div className="panel-head is-stacked">
+          <div className="panel-head-row">
+            <span>Pods</span>
+            <span className="hint">
+              {podQuery.trim()
+                ? `${shown.length} of ${onNode.length} pods`
+                : `${node.pods} pods scheduled · click a row to inspect`}
+            </span>
+          </div>
+          <TableQuerySearch
+            onApply={setPodQuery}
+            fields={POD_FIELDS}
+            placeholder="Search for pod or namespace or both"
+          />
+        </div>
         <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 120px 110px 130px 130px 110px 110px' }}>
           <span>Pod</span><span style={{ textAlign: 'left' }}>Namespace</span><span>CPU Used</span><span>Memory Used</span><span>Memory Remaining</span><span>Network In</span><span>Network Out</span>
         </div>
-        {k8sPods.filter(p => p.node === node.name).map(p => (
+        {shown.length === 0 && (
+          <div className="pod-empty-row">No pod matches “{podQuery.trim()}”.</div>
+        )}
+        {shown.map(p => (
           <div key={p.name} className="appdb-summary-row" style={{ gridTemplateColumns: '1fr 120px 110px 130px 130px 110px 110px', cursor: 'pointer' }} onClick={() => onSelectPod(p)}>
-            <span className="host-cell mono">{p.name}</span>
-            <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{p.namespace}</span>
+            <span className="host-cell mono">{highlightTerms(p.name, hits.pod, 'svc-hit')}</span>
+            <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{highlightTerms(p.namespace, hits.namespace, 'svc-hit')}</span>
             <span className="num-cell">{p.cpuUsed}</span>
             <span className="num-cell">{fmtBytes(p.memUsed)}</span>
             <span className="num-cell">{p.memRequest ? fmtBytes(p.memRequest - p.memUsed) : '-'}</span>
@@ -606,18 +639,47 @@ function K8sNodeView({ selectedNode, setSelectedNode, selectedPod, setSelectedPo
 }
 
 function K8sPodListView({ selectedPod, setSelectedPod }) {
+  const [query, setQuery] = useState('')
+
+  const { node: queryNode, ok } = parsePodQuery(query, POD_NODE_FIELDS)
+  const shown = useMemo(
+    () => (ok ? k8sPods.filter(p => matchesPod(queryNode, p, POD_NODE_FIELDS)) : k8sPods),
+    [queryNode, ok],
+  )
+  const hits = useMemo(
+    () => (ok ? highlightsFor(queryNode, POD_NODE_FIELDS) : { pod: [], namespace: [], node: [] }),
+    [queryNode, ok],
+  )
+
   if (selectedPod) return <K8sPodDetail pod={selectedPod} />
   return (
     <div className="panel">
-      <div className="panel-head">Pods <span className="hint">{k8sPods.length} pods across {k8sNodes.length} nodes · click a row to inspect</span></div>
+      <div className="panel-head is-stacked">
+        <div className="panel-head-row">
+          <span>Pods</span>
+          <span className="hint">
+            {query.trim()
+              ? `${shown.length} of ${k8sPods.length} pods`
+              : `${k8sPods.length} pods across ${k8sNodes.length} nodes · click a row to inspect`}
+          </span>
+        </div>
+        <TableQuerySearch
+          onApply={setQuery}
+          fields={POD_NODE_FIELDS}
+          placeholder="Search for pod, namespace or node"
+        />
+      </div>
       <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 120px 150px 110px 130px 110px' }}>
         <span>Pod</span><span style={{ textAlign: 'left' }}>Namespace</span><span style={{ textAlign: 'left' }}>Node</span><span>CPU Used</span><span>Memory Used</span><span>Restarts</span>
       </div>
-      {k8sPods.map(p => (
+      {shown.length === 0 && (
+        <div className="pod-empty-row">No pod matches “{query.trim()}”.</div>
+      )}
+      {shown.map(p => (
         <div key={p.name} className="appdb-summary-row" style={{ gridTemplateColumns: '1fr 120px 150px 110px 130px 110px', cursor: 'pointer' }} onClick={() => setSelectedPod(p)}>
-          <span className="host-cell mono">{p.name}</span>
-          <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{p.namespace}</span>
-          <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{p.node}</span>
+          <span className="host-cell mono">{highlightTerms(p.name, hits.pod, 'svc-hit')}</span>
+          <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{highlightTerms(p.namespace, hits.namespace, 'svc-hit')}</span>
+          <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{highlightTerms(p.node, hits.node, 'svc-hit')}</span>
           <span className="num-cell">{p.cpuUsed}</span>
           <span className="num-cell">{fmtBytes(p.memUsed)}</span>
           <span className="num-cell">0</span>
