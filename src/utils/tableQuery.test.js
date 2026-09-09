@@ -230,3 +230,14 @@ test('anything with syntax is a query, not plain text', () => {
   assert.equal(isPlainQuery('(a)'), false)
   assert.equal(isPlainQuery('pod:'), false)
 })
+
+test('the form the placeholder advertises actually parses', () => {
+  // The pod search placeholder reads "( eg. pod: kube )" — note the space after
+  // the colon. A placeholder is a promise, so it is asserted here rather than
+  // left to whoever next tidies the tokenizer. The capitalised spellings are
+  // checked alongside it because nothing stops a user typing them.
+  for (const q of ['pod: kube', 'pod:kube', 'Pod: kube', 'POD:  kube']) {
+    assert.deepEqual(run(q), ['kube-proxy-784j7'], `"${q}" should find the kube-proxy pod`)
+  }
+  assert.equal(segmentQuery('pod: kube')[0].type, 'field')
+})
