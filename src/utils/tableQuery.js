@@ -35,8 +35,31 @@ function listNames(fields) {
   return `${n.slice(0, -1).join(', ')} or ${n[n.length - 1]}`
 }
 
+// The placeholder is now the only place the syntax is taught, so it is built
+// from the field set rather than written out at each call site: every table
+// with more than one searchable column then advertises the same form, and
+// adding a column cannot leave a stale example behind.
+export function placeholderFor(fields = POD_FIELDS) {
+  const [a, b] = namesOf(fields)
+  return `Search ${listNames(fields)} ( eg. ${b ? `${a}:abc AND ${b}:def` : `${a}:abc`} )`
+}
+
 export class PodQueryError extends Error {
-  constructor(msg) { super(msg); this.name = 'PodQueryError' }
+  // `span` is [start, end) over the raw text: the characters to underline.
+  // Null when the complaint is about text that is not there yet — a query that
+  // stops mid-clause — which the caller widens to the whole line.
+  //
+  // `incomplete` separates the two kinds of wrong. A query that simply ran out
+  // — `pod:`, `a AND`, `pod:(a` — is on its way somewhere, and the next
+  // keystroke may well finish it. Anything else is a mistake already made:
+  // more typing at the end will not repair an unknown field or a stray ")".
+  // The field uses the difference to decide how loudly to say so.
+  constructor(msg, span = null, incomplete = false) {
+    super(msg)
+    this.name = 'PodQueryError'
+    this.span = span
+    this.incomplete = incomplete
+  }
 }
 
 // ---------- Tokenizer ----------
@@ -64,32 +87,41 @@ function tokenize(input) {
 // ---------- Parser ----------
 // query := or ; or := and (OR and)* ; and := term (AND? term)*
 
+// Every error points at the token it is about, so the field can squiggle those
+// characters and nothing else.
+const spanOf = (tok) => [tok.at, tok.at + String(tok.value ?? tok.t).length]
+
 function parseTokens(tokens, fields) {
   let pos = 0
   const peek = () => tokens[pos]
   const eat = () => tokens[pos++]
 
-  function parseValue(field) {
+  // `head` is the extent of the `pod:` part, which is what a missing value is
+  // really a complaint about.
+  function parseValue(field, head) {
     const tok = peek()
-    if (!tok) throw new PodQueryError(`Nothing after "${field}:" — add a value, or ${field}:* for any.`)
+    if (!tok) throw new PodQueryError(`Nothing after "${field}:" — add a value, or ${field}:* for any.`, head, true)
 
     if (tok.t === '(') {
-      eat()
+      const open = eat()
       const values = []
+      let close = null
       for (;;) {
         const v = peek()
-        if (!v) throw new PodQueryError('Unclosed "(" — add the matching ")".')
-        if (v.t === ')') { eat(); break }
+        if (!v) throw new PodQueryError('Unclosed "(" — add the matching ")".', spanOf(open), true)
+        if (v.t === ')') { close = eat(); break }
         if (v.t === 'OR' || v.t === 'AND') { eat(); continue }
-        if (v.t !== 'word') throw new PodQueryError(`Unexpected "${v.t}" inside the list.`)
+        if (v.t !== 'word') throw new PodQueryError(`Unexpected "${v.t}" inside the list.`, spanOf(v))
         eat()
         values.push(v.value)
       }
-      if (values.length === 0) throw new PodQueryError('Empty list "()" — put a value inside it, or remove it.')
+      if (values.length === 0) {
+        throw new PodQueryError('Empty list "()" — put a value inside it, or remove it.', [open.at, close.at + 1])
+      }
       return { kind: 'union', field, values }
     }
 
-    if (tok.t !== 'word') throw new PodQueryError(`Nothing after "${field}:" — add a value, or ${field}:* for any.`)
+    if (tok.t !== 'word') throw new PodQueryError(`Nothing after "${field}:" — add a value, or ${field}:* for any.`, head)
     eat()
     return tok.value === '*'
       ? { kind: 'any', field }
@@ -98,20 +130,25 @@ function parseTokens(tokens, fields) {
 
   function parseTerm() {
     const tok = peek()
-    if (!tok) throw new PodQueryError('Unfinished query.')
-    if (tok.t === ')') throw new PodQueryError('Unmatched ")" — remove it or add the opening "(".')
-    if (tok.t === 'AND' || tok.t === 'OR') throw new PodQueryError(`"${tok.t}" needs something on both sides.`)
-    if (tok.t === '(') throw new PodQueryError('Brackets group the values of one field, as in pod:(a OR b).')
-    if (tok.t === ':') throw new PodQueryError('":" needs a field name before it, like pod: or namespace:.')
+    if (!tok) throw new PodQueryError('Unfinished query.', null, true)
+    if (tok.t === ')') throw new PodQueryError('Unmatched ")" — remove it or add the opening "(".', spanOf(tok))
+    if (tok.t === 'AND' || tok.t === 'OR') throw new PodQueryError(`"${tok.t}" needs something on both sides.`, spanOf(tok))
+    if (tok.t === '(') {
+      throw new PodQueryError(`Brackets group the values of one field, as in ${namesOf(fields)[0]}:(a OR b).`, spanOf(tok))
+    }
+    if (tok.t === ':') {
+      const named = namesOf(fields).slice(0, 2).map(n => `${n}:`).join(' or ')
+      throw new PodQueryError(`":" needs a field name before it, like ${named}.`, spanOf(tok))
+    }
 
     eat()
     if (peek()?.t === ':') {
       const field = tok.value.toLowerCase()
       if (!namesOf(fields).includes(field)) {
-        throw new PodQueryError(`Unknown field "${tok.value}". Search ${listNames(fields)}.`)
+        throw new PodQueryError(`Unknown field "${tok.value}". Search ${listNames(fields)}.`, spanOf(tok))
       }
-      eat()
-      return parseValue(field)
+      const colon = eat()
+      return parseValue(field, [tok.at, colon.at + 1])
     }
     // No colon: free text, matched against either field.
     return { kind: 'free', value: tok.value }
@@ -123,8 +160,8 @@ function parseTokens(tokens, fields) {
       const tok = peek()
       if (!tok || tok.t === 'OR' || tok.t === ')') break
       if (tok.t === 'AND') {
-        eat()
-        if (!peek()) throw new PodQueryError('"AND" needs something on both sides.')
+        const op = eat()
+        if (!peek()) throw new PodQueryError('"AND" needs something on both sides.', spanOf(op), true)
       }
       parts.push(parseTerm())
     }
@@ -134,8 +171,8 @@ function parseTokens(tokens, fields) {
   function parseOr() {
     const parts = [parseAnd()]
     while (peek()?.t === 'OR') {
-      eat()
-      if (!peek()) throw new PodQueryError('"OR" needs something on both sides.')
+      const op = eat()
+      if (!peek()) throw new PodQueryError('"OR" needs something on both sides.', spanOf(op), true)
       parts.push(parseAnd())
     }
     return parts.length === 1 ? parts[0] : { kind: 'or', parts }
@@ -145,21 +182,42 @@ function parseTokens(tokens, fields) {
   if (pos < tokens.length) {
     // A stray ")" is nearly always a bracket the user forgot to open, so it
     // gets the same advice here as it does in term position.
-    if (tokens[pos].t === ')') throw new PodQueryError('Unmatched ")" — remove it or add the opening "(".')
-    throw new PodQueryError(`Unexpected "${tokens[pos].value ?? tokens[pos].t}".`)
+    if (tokens[pos].t === ')') {
+      throw new PodQueryError('Unmatched ")" — remove it or add the opening "(".', spanOf(tokens[pos]))
+    }
+    throw new PodQueryError(`Unexpected "${tokens[pos].value ?? tokens[pos].t}".`, spanOf(tokens[pos]))
   }
   return node
 }
 
-// Non-throwing. `{ ok, node, error }`. An empty query parses to a null node,
-// which matches everything — an empty search box is not a filter.
+// The text without its surrounding whitespace — what to underline when the
+// error is about something missing rather than something written.
+function textSpan(s) {
+  const start = s.length - s.trimStart().length
+  const end = s.trimEnd().length
+  return end > start ? [start, end] : null
+}
+
+// Non-throwing. `{ ok, node, error, span, incomplete }`, where `span` is the
+// extent of the offending text and `incomplete` says the query merely ran out
+// rather than went wrong. An empty query parses to a null node, which matches
+// everything — an empty search box is not a filter.
 export function parsePodQuery(input, fields = POD_FIELDS) {
+  const ok = (node) => ({ ok: true, node, error: null, span: null, incomplete: false })
   const tokens = tokenize(input)
-  if (tokens.length === 0) return { ok: true, node: null, error: null }
+  if (tokens.length === 0) return ok(null)
   try {
-    return { ok: true, node: parseTokens(tokens, fields), error: null }
+    return ok(parseTokens(tokens, fields))
   } catch (e) {
-    if (e instanceof PodQueryError) return { ok: false, node: null, error: e.message }
+    if (e instanceof PodQueryError) {
+      return {
+        ok: false,
+        node: null,
+        error: e.message,
+        span: e.span ?? textSpan(input ?? ''),
+        incomplete: e.incomplete,
+      }
+    }
     throw e
   }
 }
@@ -174,7 +232,11 @@ export function parsePodQuery(input, fields = POD_FIELDS) {
 // `field` is only claimed once the colon is there. Colouring `pod` before the
 // user has typed `:` would promise a field search they have not asked for yet,
 // and would flicker on every word that merely starts like one.
-export function segmentQuery(input, fields = POD_FIELDS) {
+//
+// `span` marks a run of characters as `bad`, which the field draws with a
+// squiggle. Splitting it in here rather than in the component keeps the mirror
+// layer's one invariant: the segments still concatenate back to the input.
+export function segmentQuery(input, fields = POD_FIELDS, span = null) {
   const s = input ?? ''
   const out = []
   const push = (text, type) => {
@@ -204,14 +266,31 @@ export function segmentQuery(input, fields = POD_FIELDS) {
     }
     push(word, 'plain')
   }
-  return out
+  return span ? markSpan(out, span) : out
 }
 
-// True when the text is ordinary words — no field, no brackets, no operators.
-// Plain text filters as you type; anything else is a query and waits to be run,
-// because a half-typed `pod:(a OR` should not empty the table under you.
-export function isPlainQuery(input) {
-  return !tokenize(input).some(t => t.t !== 'word' || /^(AND|OR)$/i.test(t.value ?? ''))
+// Re-cuts the segments at the span's edges. A span can start or end mid-segment
+// — `pod:` is one segment and only its colon may be at fault — so each segment
+// yields up to three pieces.
+function markSpan(segs, [from, to]) {
+  const out = []
+  const push = (text, type, bad) => {
+    if (!text) return
+    const last = out[out.length - 1]
+    if (last && last.type === type && !!last.bad === bad) last.text += text
+    else out.push(bad ? { text, type, bad: true } : { text, type })
+  }
+  let at = 0
+  for (const seg of segs) {
+    const len = seg.text.length
+    const a = Math.min(Math.max(from - at, 0), len)
+    const b = Math.min(Math.max(to - at, 0), len)
+    push(seg.text.slice(0, a), seg.type, false)
+    push(seg.text.slice(a, b), seg.type, true)
+    push(seg.text.slice(b), seg.type, false)
+    at += len
+  }
+  return out
 }
 
 // ---------- Matching ----------

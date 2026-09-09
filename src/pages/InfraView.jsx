@@ -566,17 +566,13 @@ function K8sNodeDetail({ node, onSelectPod }) {
                 : `${node.pods} pods scheduled · click a row to inspect`}
             </span>
           </div>
-          <TableQuerySearch
-            onApply={setPodQuery}
-            fields={POD_FIELDS}
-            placeholder="Search pod or namespace ( eg. pod: kube )"
-          />
+          <TableQuerySearch onApply={setPodQuery} fields={POD_FIELDS} />
         </div>
         <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 120px 110px 130px 130px 110px 110px' }}>
           <span>Pod</span><span style={{ textAlign: 'left' }}>Namespace</span><span>CPU Used</span><span>Memory Used</span><span>Memory Remaining</span><span>Network In</span><span>Network Out</span>
         </div>
         {shown.length === 0 && (
-          <div className="pod-empty-row">No pod matches “{podQuery.trim()}”.</div>
+          <div className="pod-empty-row">No data matches “{podQuery.trim()}”.</div>
         )}
         {shown.map(p => (
           <div key={p.name} className="appdb-summary-row" style={{ gridTemplateColumns: '1fr 120px 110px 130px 130px 110px 110px', cursor: 'pointer' }} onClick={() => onSelectPod(p)}>
@@ -663,17 +659,13 @@ function K8sPodListView({ selectedPod, setSelectedPod }) {
               : `${k8sPods.length} pods across ${k8sNodes.length} nodes · click a row to inspect`}
           </span>
         </div>
-        <TableQuerySearch
-          onApply={setQuery}
-          fields={POD_NODE_FIELDS}
-          placeholder="Search pod, namespace or node ( eg. pod: kube )"
-        />
+        <TableQuerySearch onApply={setQuery} fields={POD_NODE_FIELDS} />
       </div>
       <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 120px 150px 110px 130px 110px' }}>
         <span>Pod</span><span style={{ textAlign: 'left' }}>Namespace</span><span style={{ textAlign: 'left' }}>Node</span><span>CPU Used</span><span>Memory Used</span><span>Restarts</span>
       </div>
       {shown.length === 0 && (
-        <div className="pod-empty-row">No pod matches “{query.trim()}”.</div>
+        <div className="pod-empty-row">No data matches “{query.trim()}”.</div>
       )}
       {shown.map(p => (
         <div key={p.name} className="appdb-summary-row" style={{ gridTemplateColumns: '1fr 120px 150px 110px 130px 110px', cursor: 'pointer' }} onClick={() => setSelectedPod(p)}>

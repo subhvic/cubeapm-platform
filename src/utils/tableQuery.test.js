@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  parsePodQuery, matchesPod, highlightsFor, segmentQuery, isPlainQuery,
+  parsePodQuery, matchesPod, highlightsFor, segmentQuery, placeholderFor,
   POD_FIELDS, POD_NODE_FIELDS,
 } from './tableQuery.js'
 
@@ -215,29 +215,90 @@ test('lowercase and/or still colour as operators', () => {
   assert.equal(segmentQuery('a or b').find(s => s.text === 'or')?.type, 'op')
 })
 
-// ---------- Plain vs query ----------
-
-test('plain text is words and nothing else', () => {
-  assert.equal(isPlainQuery(''), true)
-  assert.equal(isPlainQuery('redis'), true)
-  assert.equal(isPlainQuery('redis cache'), true)
-})
-
-test('anything with syntax is a query, not plain text', () => {
-  assert.equal(isPlainQuery('pod:redis'), false)
-  assert.equal(isPlainQuery('a OR b'), false)
-  assert.equal(isPlainQuery('a or b'), false)
-  assert.equal(isPlainQuery('(a)'), false)
-  assert.equal(isPlainQuery('pod:'), false)
-})
-
-test('the form the placeholder advertises actually parses', () => {
-  // The pod search placeholder reads "( eg. pod: kube )" — note the space after
-  // the colon. A placeholder is a promise, so it is asserted here rather than
-  // left to whoever next tidies the tokenizer. The capitalised spellings are
-  // checked alongside it because nothing stops a user typing them.
+test('spellings a user might reasonably type all parse', () => {
+  // Nothing stops someone capitalising the field or spacing the colon out.
   for (const q of ['pod: kube', 'pod:kube', 'Pod: kube', 'POD:  kube']) {
     assert.deepEqual(run(q), ['kube-proxy-784j7'], `"${q}" should find the kube-proxy pod`)
   }
   assert.equal(segmentQuery('pod: kube')[0].type, 'field')
+})
+
+// ---------- The placeholder ----------
+
+test('the placeholder names every searchable column', () => {
+  assert.equal(placeholderFor(POD_FIELDS), 'Search pod or namespace ( eg. pod:abc AND namespace:def )')
+  assert.equal(
+    placeholderFor(POD_NODE_FIELDS),
+    'Search pod, namespace or node ( eg. pod:abc AND namespace:def )',
+  )
+})
+
+test('the form the placeholder advertises actually parses', () => {
+  // A placeholder is a promise, and this one is generated — so the promise is
+  // kept by pulling the worked example back out of it and running it, rather
+  // than by copying the text here where it could drift.
+  for (const fields of [POD_FIELDS, POD_NODE_FIELDS]) {
+    const example = placeholderFor(fields).match(/eg\. (.+) \)$/)[1]
+    const parsed = parsePodQuery(example, fields)
+    assert.equal(parsed.ok, true, `"${example}" should parse: ${parsed.error}`)
+    assert.equal(segmentQuery(example, fields)[0].type, 'field')
+  }
+})
+
+// ---------- Error spans ----------
+
+test('an error points at the characters it is about', () => {
+  const at = (q) => parsePodQuery(q).span
+  assert.deepEqual(at('cpu:high'), [0, 3])          // the unknown field name
+  assert.deepEqual(at('pod:(redis'), [4, 5])        // the bracket left open
+  assert.deepEqual(at('redis)'), [5, 6])            // the stray bracket
+  assert.deepEqual(at('pod:redis AND'), [10, 13])   // the operator missing a side
+  assert.deepEqual(at('pod:()'), [4, 6])            // the whole empty list
+  assert.deepEqual(at('pod:'), [0, 4])              // the clause missing its value
+  assert.deepEqual(at(':redis'), [0, 1])
+})
+
+test('an error says whether the query ran out or went wrong', () => {
+  const inc = (q) => parsePodQuery(q).incomplete
+  // The text stops mid-clause: the next keystroke could finish it, so the field
+  // holds its tongue while the caret is still there.
+  assert.equal(inc('pod:'), true)
+  assert.equal(inc('pod:redis AND'), true)
+  assert.equal(inc('pod:redis OR'), true)
+  assert.equal(inc('pod:(redis'), true)
+  // Already wrong, and typing more on the end will not repair it.
+  assert.equal(inc('cpu:high'), false)
+  assert.equal(inc('redis)'), false)
+  assert.equal(inc('pod:()'), false)
+  assert.equal(inc('pod: )'), false)
+  assert.equal(inc(':redis'), false)
+  assert.equal(inc('(pod:redis)'), false)
+  // and a query that parses has nothing to be either
+  assert.equal(inc('pod:redis'), false)
+})
+
+test('every error has something to underline', () => {
+  // The field draws no squiggle without a span, so an error that arrives
+  // without one would fail silently in the one place it matters.
+  for (const q of ['pod:', 'pod:(a', 'pod:()', 'cpu:x', ':a', 'a)', '(a)', 'a AND', 'a OR', 'AND a', 'pod: )']) {
+    const r = parsePodQuery(q)
+    assert.equal(r.ok, false, `expected "${q}" to fail`)
+    assert.ok(r.span && r.span[1] > r.span[0], `"${q}" has nothing to underline`)
+    assert.ok(r.span[1] <= q.length, `"${q}" underlines past the end of the text`)
+  }
+})
+
+test('a span cuts the segments without changing the text', () => {
+  const q = 'pod:(redis'
+  const segs = segmentQuery(q, POD_FIELDS, parsePodQuery(q).span)
+  assert.equal(segs.map(s => s.text).join(''), q)
+  assert.deepEqual(segs.filter(s => s.bad).map(s => s.text), ['('])
+})
+
+test('a span can cut inside a single segment', () => {
+  // "pod:" colours as one field segment; marking only its colon has to split it
+  assert.deepEqual(segmentQuery('pod:', POD_FIELDS, [3, 4]), [
+    { text: 'pod', type: 'field' },
+    { text: ':', type: 'field', bad: true },
+  ])
 })

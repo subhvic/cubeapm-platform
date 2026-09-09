@@ -1,9 +1,9 @@
 // The plain variant of table search: one field, text, nothing to learn.
 //
-// Its counterpart is TableQuerySearch, which adds a field syntax, operators and
-// a legend. Pick by how many fields the table can be searched on — a
-// single-field table has nothing to disambiguate, so a query language there
-// would be ceremony around a substring match.
+// Its counterpart is TableQuerySearch, which adds a field syntax and operators.
+// Pick by how many fields the table can be searched on — a single-field table
+// has nothing to disambiguate, so a query language there would be ceremony
+// around a substring match.
 //
 // Both variants share the `.svc-search` shell, so a table gains or loses the
 // syntax without the field itself changing shape.
