@@ -569,7 +569,7 @@ function K8sNodeDetail({ node, onSelectPod }) {
           <TableQuerySearch
             onApply={setPodQuery}
             fields={POD_FIELDS}
-            placeholder="Search for pod or namespace or both"
+            placeholder="Search pod or namespace ( eg. pod: kube )"
           />
         </div>
         <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 120px 110px 130px 130px 110px 110px' }}>
@@ -666,7 +666,7 @@ function K8sPodListView({ selectedPod, setSelectedPod }) {
         <TableQuerySearch
           onApply={setQuery}
           fields={POD_NODE_FIELDS}
-          placeholder="Search for pod, namespace or node"
+          placeholder="Search pod, namespace or node ( eg. pod: kube )"
         />
       </div>
       <div className="appdb-summary-head" style={{ gridTemplateColumns: '1fr 120px 150px 110px 130px 110px' }}>

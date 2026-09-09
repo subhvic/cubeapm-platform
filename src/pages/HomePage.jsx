@@ -156,7 +156,7 @@ function DetailTable({ onServiceClick }) {
         <TableSearch
           value={search}
           onChange={setSearch}
-          placeholder="Search for service names"
+          placeholder="Search service"
         />
       </div>
       <table>
