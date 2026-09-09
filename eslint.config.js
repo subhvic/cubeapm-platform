@@ -28,6 +28,7 @@ export default [
       'query-bar-package/**',
       'log-record-drawer-package/**',
       'save-query-package/**',
+      'table-search-package/**',
     ],
   },
 

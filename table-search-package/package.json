@@ -1,0 +1,20 @@
+{
+  "name": "cubeapm-table-search",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CubeAPM table search — two variants, one shell: plain text over a single column, and a small query language over several. Extracted from the redesigned frontend for integration.",
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "esbuild": "^0.24.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16"
+  }
+}
