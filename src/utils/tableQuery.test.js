@@ -5,7 +5,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   parsePodQuery, matchesPod, highlightsFor, segmentQuery, placeholderFor,
-  POD_FIELDS, POD_NODE_FIELDS,
+  tagHighlightsFor, tagTerms,
+  POD_FIELDS, POD_NODE_FIELDS, SERVICE_FIELDS,
 } from './tableQuery.js'
 
 const pod = (name, namespace) => ({ name, namespace })
@@ -226,10 +227,10 @@ test('spellings a user might reasonably type all parse', () => {
 // ---------- The placeholder ----------
 
 test('the placeholder names every searchable column', () => {
-  assert.equal(placeholderFor(POD_FIELDS), 'Search pod or namespace ( eg. pod:abc AND namespace:def )')
+  assert.equal(placeholderFor(POD_FIELDS), 'Search pod or namespace ( eg. pod:abc AND pod.tag:value )')
   assert.equal(
     placeholderFor(POD_NODE_FIELDS),
-    'Search pod, namespace or node ( eg. pod:abc AND namespace:def )',
+    'Search pod, namespace or node ( eg. pod:abc AND pod.tag:value )',
   )
 })
 
@@ -237,7 +238,7 @@ test('the form the placeholder advertises actually parses', () => {
   // A placeholder is a promise, and this one is generated — so the promise is
   // kept by pulling the worked example back out of it and running it, rather
   // than by copying the text here where it could drift.
-  for (const fields of [POD_FIELDS, POD_NODE_FIELDS]) {
+  for (const fields of [POD_FIELDS, POD_NODE_FIELDS, SERVICE_FIELDS]) {
     const example = placeholderFor(fields).match(/eg\. (.+) \)$/)[1]
     const parsed = parsePodQuery(example, fields)
     assert.equal(parsed.ok, true, `"${example}" should parse: ${parsed.error}`)
@@ -301,4 +302,107 @@ test('a span can cut inside a single segment', () => {
     { text: 'pod', type: 'field' },
     { text: ':', type: 'field', bad: true },
   ])
+})
+
+// ---------- Tags ----------
+// A column can carry tags, searched through the column that owns them:
+// `service.team:alpha`. The prefix is what makes them unambiguous — two
+// columns can both carry a `team`.
+
+const svc = (name, tags) => ({ name, tags })
+const SERVICES = [
+  svc('payment-service', { team: 'alpha', tier: 'critical' }),
+  svc('order-service', { team: 'alpha', tier: 'standard' }),
+  svc('search-service', { team: 'beta' }),
+  svc('legacy-service', {}),
+]
+
+const svcRun = (q) => {
+  const r = parsePodQuery(q, SERVICE_FIELDS)
+  assert.equal(r.ok, true, `expected "${q}" to parse, got: ${r.error}`)
+  return SERVICES.filter(s => matchesPod(r.node, s, SERVICE_FIELDS)).map(s => s.name)
+}
+const svcFails = (q) => {
+  const r = parsePodQuery(q, SERVICE_FIELDS)
+  assert.equal(r.ok, false, `expected "${q}" to fail`)
+  return r
+}
+
+test('a tag is searched through the column that owns it', () => {
+  assert.deepEqual(svcRun('service.team:alpha'), ['payment-service', 'order-service'])
+  assert.deepEqual(svcRun('service.tier:critical'), ['payment-service'])
+})
+
+test('tag terms combine like any other', () => {
+  assert.deepEqual(svcRun('service.team:alpha AND service.tier:standard'), ['order-service'])
+  assert.deepEqual(svcRun('service.team:(alpha OR beta)'),
+    ['payment-service', 'order-service', 'search-service'])
+  assert.deepEqual(svcRun('service.tier:critical OR service.team:beta'),
+    ['payment-service', 'search-service'])
+})
+
+test('tag:* asks whether the tag is there at all', () => {
+  assert.deepEqual(svcRun('service.tier:*'), ['payment-service', 'order-service'])
+  assert.deepEqual(svcRun('service.team:*'),
+    ['payment-service', 'order-service', 'search-service'])
+})
+
+test('a column term and a tag term on the same column are different questions', () => {
+  // "alpha" is a team, not part of any service name
+  assert.deepEqual(svcRun('service:alpha'), [])
+  assert.deepEqual(svcRun('service.team:alpha'), ['payment-service', 'order-service'])
+})
+
+// The tags are on screen in that column, so a word the user can see has to be
+// findable by typing it.
+test('free text reads tags as well as the column value', () => {
+  assert.deepEqual(svcRun('beta'), ['search-service'])
+  assert.deepEqual(svcRun('payment'), ['payment-service'])
+})
+
+test('a tag reference tokenises as one thing, dots and all', () => {
+  const nested = [{ name: 'a', tags: { 'k8s.app': 'web' } }]
+  const r = parsePodQuery('service.k8s.app:web', SERVICE_FIELDS)
+  assert.equal(r.ok, true, r.error)
+  // split on the FIRST dot: the field is `service`, the tag is `k8s.app`
+  assert.deepEqual(r.node, { kind: 'field', field: 'service', tag: 'k8s.app', value: 'web' })
+  assert.equal(matchesPod(r.node, nested[0], SERVICE_FIELDS), true)
+})
+
+test('a column with no tags says so, rather than "unknown field"', () => {
+  assert.deepEqual(svcRun('service.'), [])          // no colon: free text
+  assert.match(svcFails('service.:alpha').error, /name the tag/i)
+  const r = parsePodQuery('namespace.team:x', POD_FIELDS)
+  assert.equal(r.ok, false)
+  assert.match(r.error, /no tags/i)
+})
+
+test('an unknown field still points at the tag syntax where there is one', () => {
+  assert.match(svcFails('nope:x').error, /service\.tag:value/)
+})
+
+test('tag terms highlight in the tag, not in the column value', () => {
+  const { node } = parsePodQuery('service.team:alpha', SERVICE_FIELDS)
+  assert.deepEqual(highlightsFor(node, SERVICE_FIELDS), { service: [] })
+  assert.deepEqual(tagTerms(tagHighlightsFor(node, SERVICE_FIELDS), 'service', 'team'), ['alpha'])
+  assert.deepEqual(tagTerms(tagHighlightsFor(node, SERVICE_FIELDS), 'service', 'tier'), [])
+})
+
+test('free text highlights in every tag, since any of them could have matched', () => {
+  const { node } = parsePodQuery('alpha', SERVICE_FIELDS)
+  assert.deepEqual(highlightsFor(node, SERVICE_FIELDS), { service: ['alpha'] })
+  const hits = tagHighlightsFor(node, SERVICE_FIELDS)
+  assert.deepEqual(tagTerms(hits, 'service', 'team'), ['alpha'])
+  assert.deepEqual(tagTerms(hits, 'service', 'anything-at-all'), ['alpha'])
+})
+
+test('a tag reference colours as one token', () => {
+  assert.deepEqual(segmentQuery('service.team:alpha', SERVICE_FIELDS), [
+    { text: 'service.team:', type: 'field' },
+    { text: 'alpha', type: 'plain' },
+  ])
+})
+
+test('the single-column placeholder spends its example on the tag form', () => {
+  assert.match(placeholderFor(SERVICE_FIELDS), /service\.tag:value/)
 })

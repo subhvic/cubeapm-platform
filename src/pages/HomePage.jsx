@@ -5,6 +5,7 @@ import { statusForLatency, statusForErrorRate, statusColor } from '@/utils/statu
 import PageBar from '@/components/layout/PageBar'
 import { highlightTerms } from '@/utils/highlight'
 import TableSearch from '@/components/TableSearch'
+import { parsePodQuery, matchesPod, highlightsFor, tagHighlightsFor, tagTerms, SERVICE_FIELDS } from '@/utils/tableQuery'
 
 const BASE_TIME = new Date()
 
@@ -128,15 +129,25 @@ function Onboarding({ onDismiss }) {
 function DetailTable({ onServiceClick }) {
   const [search, setSearch] = useState('')
   const term = search.trim()
+  // A query that does not parse leaves the rows alone rather than emptying the
+  // table under someone mid-`service.team:(`.
+  const { node: queryNode, ok } = parsePodQuery(search, SERVICE_FIELDS)
 
   // Filtering only removes rows, so severity order survives it — `services` is
   // already sorted critical-first at the data layer, and a search must never be
   // the thing that quietly reorders the list alphabetically.
-  const shown = useMemo(() => {
-    if (!term) return services
-    const q = term.toLowerCase()
-    return services.filter(s => s.name.toLowerCase().includes(q))
-  }, [term])
+  const shown = useMemo(
+    () => (ok ? services.filter(s => matchesPod(queryNode, s, SERVICE_FIELDS)) : services),
+    [queryNode, ok]
+  )
+
+  // Two highlight sets: the service name, and the tag chips. A term aimed at
+  // one tag underlines only that tag; free text underlines wherever it could
+  // have matched, which is both.
+  const hits = useMemo(
+    () => (ok ? highlightsFor(queryNode, SERVICE_FIELDS) : { service: [] }), [queryNode, ok])
+  const tagHits = useMemo(
+    () => (ok ? tagHighlightsFor(queryNode, SERVICE_FIELDS) : {}), [queryNode, ok])
 
   // The hint slot earns its keep either way: the sort rule when the whole list
   // is showing, the count when it is not.
@@ -153,11 +164,7 @@ function DetailTable({ onServiceClick }) {
           <span>All services</span>
           <span className="hint">{hint}</span>
         </div>
-        <TableSearch
-          value={search}
-          onChange={setSearch}
-          placeholder="Search service"
-        />
+        <TableSearch onApply={setSearch} />
       </div>
       <table>
         <thead>
@@ -189,10 +196,18 @@ function DetailTable({ onServiceClick }) {
                         flex row with a gap, so returning the name as several
                         nodes would space each fragment apart. */}
                     <span className="svc-name-text">
-                      {term ? highlightTerms(s.name, [term], 'svc-hit') : s.name}
+                      {highlightTerms(s.name, hits.service, 'svc-hit')}
                     </span>
                     <span className="svc-lang">{s.language}</span>
                     <span className={`badge ${s.status}`}>{s.status}</span>
+                    {/* The tags live in this column, so they are searched
+                        through it: service.team:payments. */}
+                    {Object.entries(s.tags ?? {}).map(([k, v]) => (
+                      <span key={k} className="svc-tag" title={`${k}: ${v} — search as service.${k}:${v}`}>
+                        <span className="svc-tag-k">{k}</span>
+                        <span className="svc-tag-v">{highlightTerms(v, tagTerms(tagHits, 'service', k), 'svc-hit')}</span>
+                      </span>
+                    ))}
                   </div>
                 </td>
                 <td>{s.rpm >= 1000 ? (s.rpm / 1000).toFixed(2) + 'K' : s.rpm.toFixed(2)}</td>

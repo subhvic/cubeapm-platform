@@ -8,7 +8,7 @@ import {
 } from '@/data/observability'
 import PageBar from '@/components/layout/PageBar'
 import TableQuerySearch from '@/components/TableQuerySearch'
-import { parsePodQuery, matchesPod, highlightsFor, POD_FIELDS, POD_NODE_FIELDS } from '@/utils/tableQuery'
+import { parsePodQuery, matchesPod, highlightsFor, tagHighlightsFor, tagTerms, POD_FIELDS, POD_NODE_FIELDS } from '@/utils/tableQuery'
 import { highlightTerms } from '@/utils/highlight'
 
 const BASE_TIME = new Date()
@@ -528,6 +528,7 @@ function K8sNodeDetail({ node, onSelectPod }) {
     [onNode, queryNode, ok],
   )
   const hits = useMemo(() => (ok ? highlightsFor(queryNode) : { pod: [], namespace: [] }), [queryNode, ok])
+  const tagHits = useMemo(() => (ok ? tagHighlightsFor(queryNode) : {}), [queryNode, ok])
 
   return (
     <div>
@@ -576,7 +577,15 @@ function K8sNodeDetail({ node, onSelectPod }) {
         )}
         {shown.map(p => (
           <div key={p.name} className="appdb-summary-row" style={{ gridTemplateColumns: '1fr 120px 110px 130px 130px 110px 110px', cursor: 'pointer' }} onClick={() => onSelectPod(p)}>
-            <span className="host-cell mono">{highlightTerms(p.name, hits.pod, 'svc-hit')}</span>
+            <span className="host-cell mono">
+              <span className="host-cell-name">{highlightTerms(p.name, hits.pod, 'svc-hit')}</span>
+              {Object.entries(p.labels ?? {}).map(([k, v]) => (
+                <span key={k} className="svc-tag" title={`${k}: ${v} — search as pod.${k}:${v}`}>
+                  <span className="svc-tag-k">{k}</span>
+                  <span className="svc-tag-v">{highlightTerms(v, tagTerms(tagHits, 'pod', k), 'svc-hit')}</span>
+                </span>
+              ))}
+            </span>
             <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{highlightTerms(p.namespace, hits.namespace, 'svc-hit')}</span>
             <span className="num-cell">{p.cpuUsed}</span>
             <span className="num-cell">{fmtBytes(p.memUsed)}</span>
@@ -646,6 +655,7 @@ function K8sPodListView({ selectedPod, setSelectedPod }) {
     () => (ok ? highlightsFor(queryNode, POD_NODE_FIELDS) : { pod: [], namespace: [], node: [] }),
     [queryNode, ok],
   )
+  const tagHits = useMemo(() => (ok ? tagHighlightsFor(queryNode, POD_NODE_FIELDS) : {}), [queryNode, ok])
 
   if (selectedPod) return <K8sPodDetail pod={selectedPod} />
   return (
@@ -669,7 +679,15 @@ function K8sPodListView({ selectedPod, setSelectedPod }) {
       )}
       {shown.map(p => (
         <div key={p.name} className="appdb-summary-row" style={{ gridTemplateColumns: '1fr 120px 150px 110px 130px 110px', cursor: 'pointer' }} onClick={() => setSelectedPod(p)}>
-          <span className="host-cell mono">{highlightTerms(p.name, hits.pod, 'svc-hit')}</span>
+          <span className="host-cell mono">
+            <span className="host-cell-name">{highlightTerms(p.name, hits.pod, 'svc-hit')}</span>
+            {Object.entries(p.labels ?? {}).map(([k, v]) => (
+              <span key={k} className="svc-tag" title={`${k}: ${v} — search as pod.${k}:${v}`}>
+                <span className="svc-tag-k">{k}</span>
+                <span className="svc-tag-v">{highlightTerms(v, tagTerms(tagHits, 'pod', k), 'svc-hit')}</span>
+              </span>
+            ))}
+          </span>
           <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{highlightTerms(p.namespace, hits.namespace, 'svc-hit')}</span>
           <span className="num-cell" style={{ textAlign: 'left', fontFamily: "'JetBrains Mono',monospace", color: 'var(--text-secondary)' }}>{highlightTerms(p.node, hits.node, 'svc-hit')}</span>
           <span className="num-cell">{p.cpuUsed}</span>

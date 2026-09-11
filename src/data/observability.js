@@ -357,13 +357,14 @@ export const k8sNodes = K8S_NODE_ROWS.map((n, i) => ({
   netOutSeries: generateHostSeries({ base: n.netOut * 100000, incident: 1.2, seed: 2401 + i }),
 }))
 
+// `labels` are the pod column's tags, searched as `pod.app:redis`.
 const K8S_POD_ROWS = [
-  { name: 'payment-service-7d8b9c-4vk2q', namespace: 'default', node: 'ip-10-0-142-133', cpuUsed: 0.09, cpuRequest: 0.25, cpuLimit: 0.25, memUsed: 418_800_000, memRequest: 536_900_000, memLimit: 536_900_000, netIn: 12.4, netOut: 8.9 },
-  { name: 'redis-0', namespace: 'default', node: 'ip-10-0-142-133', cpuUsed: 0.04, cpuRequest: 0.1, cpuLimit: 0.1, memUsed: 210_500_000, memRequest: 256_000_000, memLimit: 256_000_000, netIn: 40.2, netOut: 38.7 },
-  { name: 'coredns-66bc5c9577-zkrnm', namespace: 'kube-system', node: 'ip-10-0-142-133', cpuUsed: 0.0012, cpuRequest: 0.1, cpuLimit: 0.1, memUsed: 19_400_000, memRequest: 70_000_000, memLimit: 170_000_000, netIn: 1.1, netOut: 0.9 },
-  { name: 'kube-proxy-784j7', namespace: 'kube-system', node: 'ip-10-0-143-40', cpuUsed: 0.0002, cpuRequest: 0, cpuLimit: 0, memUsed: 20_500_000, memRequest: 0, memLimit: 0, netIn: 0.4, netOut: 0.3 },
-  { name: 'order-service-6c8f4b-8ct9x', namespace: 'default', node: 'ip-10-0-143-40', cpuUsed: 0.05, cpuRequest: 0.2, cpuLimit: 0.2, memUsed: 180_200_000, memRequest: 256_000_000, memLimit: 256_000_000, netIn: 9.6, netOut: 7.1 },
-  { name: 'storage-provisioner', namespace: 'kube-system', node: 'ip-10-0-143-40', cpuUsed: 0.0016, cpuRequest: 0, cpuLimit: 0, memUsed: 13_100_000, memRequest: 0, memLimit: 0, netIn: 0.2, netOut: 0.2 },
+  { name: 'payment-service-7d8b9c-4vk2q', labels: { app: 'payment', tier: 'backend', team: 'payments' }, namespace: 'default', node: 'ip-10-0-142-133', cpuUsed: 0.09, cpuRequest: 0.25, cpuLimit: 0.25, memUsed: 418_800_000, memRequest: 536_900_000, memLimit: 536_900_000, netIn: 12.4, netOut: 8.9 },
+  { name: 'redis-0', labels: { app: 'redis', tier: 'cache', team: 'platform' }, namespace: 'default', node: 'ip-10-0-142-133', cpuUsed: 0.04, cpuRequest: 0.1, cpuLimit: 0.1, memUsed: 210_500_000, memRequest: 256_000_000, memLimit: 256_000_000, netIn: 40.2, netOut: 38.7 },
+  { name: 'coredns-66bc5c9577-zkrnm', labels: { app: 'coredns', tier: 'system' }, namespace: 'kube-system', node: 'ip-10-0-142-133', cpuUsed: 0.0012, cpuRequest: 0.1, cpuLimit: 0.1, memUsed: 19_400_000, memRequest: 70_000_000, memLimit: 170_000_000, netIn: 1.1, netOut: 0.9 },
+  { name: 'kube-proxy-784j7', labels: { app: 'kube-proxy', tier: 'system' }, namespace: 'kube-system', node: 'ip-10-0-143-40', cpuUsed: 0.0002, cpuRequest: 0, cpuLimit: 0, memUsed: 20_500_000, memRequest: 0, memLimit: 0, netIn: 0.4, netOut: 0.3 },
+  { name: 'order-service-6c8f4b-8ct9x', labels: { app: 'order', tier: 'backend', team: 'checkout' }, namespace: 'default', node: 'ip-10-0-143-40', cpuUsed: 0.05, cpuRequest: 0.2, cpuLimit: 0.2, memUsed: 180_200_000, memRequest: 256_000_000, memLimit: 256_000_000, netIn: 9.6, netOut: 7.1 },
+  { name: 'storage-provisioner', labels: { app: 'storage', tier: 'system' }, namespace: 'kube-system', node: 'ip-10-0-143-40', cpuUsed: 0.0016, cpuRequest: 0, cpuLimit: 0, memUsed: 13_100_000, memRequest: 0, memLimit: 0, netIn: 0.2, netOut: 0.2 },
 ]
 
 export const k8sPods = K8S_POD_ROWS.map((p, i) => ({
