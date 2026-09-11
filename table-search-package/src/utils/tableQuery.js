@@ -11,21 +11,56 @@
 //   pod:redis AND namespace:default
 //   pod:redis OR pod:coredns
 //
+// A column may also carry tags, which are searched through the column that
+// owns them:
+//
+//   service.team:alpha         the service column's `team` tag is alpha
+//   service.team:*             the service carries a team tag at all
+//   service.team:(a OR b)      either
+//
+// `field.tag` rather than a bare `tag` because a tag name is only unique
+// within its column: two columns can both carry `team`, and the table cannot
+// guess which was meant. It also keeps tags from colliding with column names
+// as either set grows.
+//
 // AND binds tighter than OR, which is what every other query language does and
 // therefore what someone typing `a OR b AND c` expects. The logs builder's
 // flat, precedence-free chip list is a different contract for a different
 // input; matching it here would surprise more people than it would please.
 
-// A field is `{ name, key }`: what the user types, and the row property it
-// reads. They differ more often than not — the pod column is a row's `name`.
+// A field is `{ name, key, tags? }`: what the user types, the row property it
+// reads, and — when the column carries tags — the row property holding them.
+// Name and key differ more often than not: the pod column is a row's `name`.
 export const POD_FIELDS = [
-  { name: 'pod', key: 'name' },
+  { name: 'pod', key: 'name', tags: 'labels' },
   { name: 'namespace', key: 'namespace' },
 ]
 export const POD_NODE_FIELDS = [...POD_FIELDS, { name: 'node', key: 'node' }]
 
+// One column, which is what makes this the simpler variant: nothing to
+// disambiguate between, so the field prefix is optional in practice and most
+// queries are a word. The tags are why it is a query at all now.
+export const SERVICE_FIELDS = [
+  { name: 'service', key: 'name', tags: 'tags' },
+]
+
 const namesOf = (fields) => fields.map(f => f.name)
-const keyFor = (fields, name) => fields.find(f => f.name === name)?.key
+const fieldFor = (fields, name) => fields.find(f => f.name === name)
+const taggedFields = (fields) => fields.filter(f => f.tags)
+
+// Resolves the word before a colon. Either a column, or a column's tag written
+// `column.tag`. Split on the FIRST dot only: tag names commonly contain dots
+// themselves (`k8s.app`), while no column name does.
+function resolveRef(raw, fields) {
+  const direct = fieldFor(fields, raw)
+  if (direct) return { field: direct.name, tag: null }
+  const dot = raw.indexOf('.')
+  if (dot <= 0) return null
+  const owner = fieldFor(fields, raw.slice(0, dot))
+  const tag = raw.slice(dot + 1)
+  if (!owner || !owner.tags || !tag) return null
+  return { field: owner.name, tag }
+}
 
 // "pod or namespace", "pod, namespace or node" — the phrasing an error uses to
 // say what it will accept.
@@ -41,7 +76,13 @@ function listNames(fields) {
 // adding a column cannot leave a stale example behind.
 export function placeholderFor(fields = POD_FIELDS) {
   const [a, b] = namesOf(fields)
-  return `Search ${listNames(fields)} ( eg. ${b ? `${a}:abc AND ${b}:def` : `${a}:abc`} )`
+  const tagged = taggedFields(fields)[0]
+  const example = tagged
+    ? `${a}:abc ${b ? 'AND' : 'or'} ${tagged.name}.tag:value`
+    : b
+      ? `${a}:abc AND ${b}:def`
+      : `${a}:abc`
+  return `Search ${listNames(fields)} ( eg. ${example} )`
 }
 
 export class PodQueryError extends Error {
@@ -91,16 +132,32 @@ function tokenize(input) {
 // characters and nothing else.
 const spanOf = (tok) => [tok.at, tok.at + String(tok.value ?? tok.t).length]
 
+// `pod.` and `namespace.team` fail for different reasons than `foo` does, and
+// being told "unknown field" for a column that exists but carries no tags
+// sends someone looking in the wrong place.
+function unknownRef(raw, typed, fields) {
+  const dot = raw.indexOf('.')
+  if (dot > 0) {
+    const owner = fieldFor(fields, raw.slice(0, dot))
+    if (owner && !owner.tags) return `"${owner.name}" has no tags to search.`
+    if (owner && !raw.slice(dot + 1)) return `Nothing after "${owner.name}." — name the tag, as in ${owner.name}.team:alpha.`
+  }
+  const tagged = taggedFields(fields)[0]
+  const tagHint = tagged ? ` Tags are searched as ${tagged.name}.tag:value.` : ''
+  return `Unknown field "${typed}". Search ${listNames(fields)}.${tagHint}`
+}
+
 function parseTokens(tokens, fields) {
   let pos = 0
   const peek = () => tokens[pos]
   const eat = () => tokens[pos++]
 
   // `head` is the extent of the `pod:` part, which is what a missing value is
-  // really a complaint about.
-  function parseValue(field, head) {
+  // really a complaint about. `label` is what the user actually typed there —
+  // `pod` or `service.team` — so the advice quotes their text back.
+  function parseValue(ref, head, label) {
     const tok = peek()
-    if (!tok) throw new PodQueryError(`Nothing after "${field}:" — add a value, or ${field}:* for any.`, head, true)
+    if (!tok) throw new PodQueryError(`Nothing after "${label}:" — add a value, or ${label}:* for any.`, head, true)
 
     if (tok.t === '(') {
       const open = eat()
@@ -118,14 +175,14 @@ function parseTokens(tokens, fields) {
       if (values.length === 0) {
         throw new PodQueryError('Empty list "()" — put a value inside it, or remove it.', [open.at, close.at + 1])
       }
-      return { kind: 'union', field, values }
+      return { kind: 'union', field: ref.field, tag: ref.tag, values }
     }
 
-    if (tok.t !== 'word') throw new PodQueryError(`Nothing after "${field}:" — add a value, or ${field}:* for any.`, head)
+    if (tok.t !== 'word') throw new PodQueryError(`Nothing after "${label}:" — add a value, or ${label}:* for any.`, head)
     eat()
     return tok.value === '*'
-      ? { kind: 'any', field }
-      : { kind: 'field', field, value: tok.value }
+      ? { kind: 'any', field: ref.field, tag: ref.tag }
+      : { kind: 'field', field: ref.field, tag: ref.tag, value: tok.value }
   }
 
   function parseTerm() {
@@ -143,12 +200,11 @@ function parseTokens(tokens, fields) {
 
     eat()
     if (peek()?.t === ':') {
-      const field = tok.value.toLowerCase()
-      if (!namesOf(fields).includes(field)) {
-        throw new PodQueryError(`Unknown field "${tok.value}". Search ${listNames(fields)}.`, spanOf(tok))
-      }
+      const raw = tok.value.toLowerCase()
+      const ref = resolveRef(raw, fields)
+      if (!ref) throw new PodQueryError(unknownRef(raw, tok.value, fields), spanOf(tok))
       const colon = eat()
-      return parseValue(field, [tok.at, colon.at + 1])
+      return parseValue(ref, [tok.at, colon.at + 1], raw)
     }
     // No colon: free text, matched against either field.
     return { kind: 'free', value: tok.value }
@@ -231,7 +287,8 @@ export function parsePodQuery(input, fields = POD_FIELDS) {
 //
 // `field` is only claimed once the colon is there. Colouring `pod` before the
 // user has typed `:` would promise a field search they have not asked for yet,
-// and would flicker on every word that merely starts like one.
+// and would flicker on every word that merely starts like one. A tag reference
+// colours as one token, `service.team:` — it names one thing.
 //
 // `span` marks a run of characters as `bad`, which the field draws with a
 // squiggle. Splitting it in here rather than in the component keeps the mirror
@@ -259,7 +316,7 @@ export function segmentQuery(input, fields = POD_FIELDS, span = null) {
     const upper = word.toUpperCase()
 
     if (upper === 'AND' || upper === 'OR') { push(word, 'op'); continue }
-    if (s[i] === ':' && namesOf(fields).includes(word.toLowerCase())) {
+    if (s[i] === ':' && resolveRef(word.toLowerCase(), fields)) {
       push(word + ':', 'field')
       i++
       continue
@@ -295,18 +352,32 @@ function markSpan(segs, [from, to]) {
 
 // ---------- Matching ----------
 
-const valueOf = (row, fields, name) => String(row?.[keyFor(fields, name)] ?? '')
-const has = (haystack, needle) => haystack.toLowerCase().includes(needle.toLowerCase())
+// Reads either the column's own value or one of its tags, depending on the
+// node. Both are strings by the time they leave here, so the matcher below
+// does not care which it got.
+function valueOf(row, fields, name, tag = null) {
+  const f = fieldFor(fields, name)
+  if (!f) return ''
+  if (!tag) return String(row?.[f.key] ?? '')
+  return f.tags ? String(row?.[f.tags]?.[tag] ?? '') : ''
+}
+
+const tagValuesOf = (row, f) => (f.tags ? Object.values(row?.[f.tags] ?? {}) : [])
+const has = (haystack, needle) => String(haystack).toLowerCase().includes(needle.toLowerCase())
 
 export function matchesPod(node, row, fields = POD_FIELDS) {
   if (!node) return true
   switch (node.kind) {
     case 'and':   return node.parts.every(p => matchesPod(p, row, fields))
     case 'or':    return node.parts.some(p => matchesPod(p, row, fields))
-    case 'any':   return valueOf(row, fields, node.field).length > 0
-    case 'field': return has(valueOf(row, fields, node.field), node.value)
-    case 'union': return node.values.some(v => has(valueOf(row, fields, node.field), v))
-    case 'free':  return namesOf(fields).some(n => has(valueOf(row, fields, n), node.value))
+    case 'any':   return valueOf(row, fields, node.field, node.tag).length > 0
+    case 'field': return has(valueOf(row, fields, node.field, node.tag), node.value)
+    case 'union': return node.values.some(v => has(valueOf(row, fields, node.field, node.tag), v))
+    // Free text reads the tags too. They are shown in the column, so a word
+    // visible on screen that the search would not find reads as a broken box.
+    case 'free':  return fields.some(f =>
+      has(valueOf(row, fields, f.name), node.value)
+      || tagValuesOf(row, f).some(v => has(v, node.value)))
     default:      return true
   }
 }
@@ -322,11 +393,14 @@ export function highlightsFor(node, fields = POD_FIELDS, out = null) {
     case 'or':
       node.parts.forEach(p => highlightsFor(p, fields, acc))
       break
+    // A tag term highlights in the tag, not in the column's own value — see
+    // tagHighlightsFor. `service.team:alpha` should not underline "alpha"
+    // wherever it happens to occur in a service name.
     case 'field':
-      acc[node.field]?.push(node.value)
+      if (!node.tag) acc[node.field]?.push(node.value)
       break
     case 'union':
-      acc[node.field]?.push(...node.values)
+      if (!node.tag) acc[node.field]?.push(...node.values)
       break
     case 'free':
       namesOf(fields).forEach(n => acc[n].push(node.value))
@@ -339,4 +413,49 @@ export function highlightsFor(node, fields = POD_FIELDS, out = null) {
     acc[n] = [...new Set(acc[n])].sort((a, b) => b.length - a.length)
   }
   return acc
+}
+
+// The strings to highlight inside each tag, as `{ field: { tag: [terms] } }`.
+//
+// Free text is collected under ANY, because it matches whatever tag happens to
+// contain it and this function cannot know which tags a row carries. Callers
+// read a tag's terms through `tagTerms` rather than indexing directly, so that
+// merge happens in one place.
+export const ANY_TAG = '*'
+
+export function tagHighlightsFor(node, fields = POD_FIELDS, out = null) {
+  const acc = out ?? Object.fromEntries(taggedFields(fields).map(f => [f.name, {}]))
+  if (!node) return acc
+  const add = (field, tag, values) => {
+    if (!acc[field]) return
+    acc[field][tag] = [...new Set([...(acc[field][tag] ?? []), ...values])]
+      .sort((a, b) => b.length - a.length)
+  }
+  switch (node.kind) {
+    case 'and':
+    case 'or':
+      node.parts.forEach(p => tagHighlightsFor(p, fields, acc))
+      break
+    case 'field':
+      if (node.tag) add(node.field, node.tag, [node.value])
+      break
+    case 'union':
+      if (node.tag) add(node.field, node.tag, node.values)
+      break
+    case 'free':
+      taggedFields(fields).forEach(f => add(f.name, ANY_TAG, [node.value]))
+      break
+    default:
+      break
+  }
+  return acc
+}
+
+// The terms to highlight in one tag chip: the ones aimed at that tag by name,
+// plus any free text, which could have matched it.
+export function tagTerms(tagHits, field, tag) {
+  const forField = tagHits?.[field]
+  if (!forField) return []
+  return [...new Set([...(forField[tag] ?? []), ...(forField[ANY_TAG] ?? [])])]
+    .sort((a, b) => b.length - a.length)
 }

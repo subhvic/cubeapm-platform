@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "CubeAPM table search — two variants, one shell: plain text over a single column, and a small query language over several. Extracted from the redesigned frontend for integration.",
+  "description": "CubeAPM table search — a small query language for table rows: fields, AND/OR, unions and tags, in two variants over one implementation. Extracted from the redesigned frontend for integration.",
   "scripts": {
     "test": "node scripts/run-tests.mjs"
   },
