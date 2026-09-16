@@ -37,7 +37,7 @@ const NAV_GROUPS = [
     { id: 'logs', label: 'Logs', icon: 'logs', enabled: true },
     { id: 'infra', label: 'Infrastructure', icon: 'server', enabled: true },
     { id: 'rum', label: 'Browser (RUM)', icon: 'monitor' },
-    { id: 'traces', label: 'Traces', icon: 'branch' },
+    { id: 'traces', label: 'Traces', icon: 'branch', enabled: true },
     { id: 'errors', label: 'Errors', icon: 'triangle' },
     { id: 'dash', label: 'Dashboards', icon: 'dashboard' },
   ]},
@@ -54,7 +54,11 @@ const NAV_GROUPS = [
 ]
 
 export default function Sidebar({ navCollapsed, setNavCollapsed, view, goHome, setView, onOpenHelp, onLogout, theme, setTheme }) {
-  const activeId = view === 'home' ? 'home' : view === 'logs' ? 'logs' : view === 'infra' ? 'infra' : 'apm'
+  // A single trace's waterfall belongs to Traces, so the nav keeps that item lit
+  // while you are inside one rather than jumping the highlight to APM.
+  const activeId = view === 'home' ? 'home' : view === 'logs' ? 'logs'
+    : view === 'traces' || view === 'trace' ? 'traces'
+    : view === 'infra' ? 'infra' : 'apm'
   const [profileOpen, setProfileOpen] = useState(false)
   const [popPos, setPopPos] = useState({ left: 0, bottom: 0 })
   const btnRef = useRef(null)
@@ -97,7 +101,7 @@ export default function Sidebar({ navCollapsed, setNavCollapsed, view, goHome, s
                   key={it.id}
                   className={`nav-item${on ? ' active' : ''}${enabled ? '' : ' disabled'}`}
                   title={enabled ? it.label : `${it.label} - later redesign phase`}
-                  onClick={enabled ? (it.id === 'home' ? goHome : it.id === 'apm' ? () => setView('service') : it.id === 'logs' ? () => setView('logs') : it.id === 'infra' ? () => setView('infra') : undefined) : undefined}
+                  onClick={enabled ? (it.id === 'home' ? goHome : it.id === 'apm' ? () => setView('service') : it.id === 'logs' ? () => setView('logs') : it.id === 'traces' ? () => setView('traces') : it.id === 'infra' ? () => setView('infra') : undefined) : undefined}
                   tabIndex={enabled ? 0 : undefined}
                 >
                   <Icon name={it.icon} />

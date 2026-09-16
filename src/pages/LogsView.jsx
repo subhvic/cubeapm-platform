@@ -21,6 +21,10 @@ import { Sigma, Network, ArrowUpDown, Hash, Calculator, AlertCircle, Bookmark, B
 import { ALIASES, isNoiseField } from '@/utils/logFields'
 import { escapeRegex, highlightTerms } from '@/utils/highlight'
 import { LogRecordDrawer } from '@/components/LogRecordDrawer'
+import FacetGroup from '@/components/explorer/FacetGroup'
+import FieldsDropdown from '@/components/explorer/FieldsDropdown'
+import QueryHistoryDrawer from '@/components/explorer/QueryHistoryDrawer'
+import AlertDrawer from '@/components/explorer/AlertDrawer'
 
 const AGG_ALL_FIELDS = FIELD_CATALOG.map(f => f.field)
 const AGG_NUMERIC_FIELDS = new Set(FIELD_CATALOG.filter(f => f.type === 'keyword').map(f => f.field))
@@ -60,95 +64,6 @@ function VolumeTooltip({ active, payload, label }) {
   )
 }
 
-// Rows visible before the facet list starts scrolling.
-const FACET_VISIBLE_ROWS = 6
-
-// The "N selected" count doubles as the control that narrows the list to those
-// selections. One affordance for every facet: log.level used to carry a second,
-// text-link version of the same action, which made the panel's first group the
-// one place the interaction had to be learnt twice.
-function FacetGroup({ title, options, selected, onToggle }) {
-  const [open, setOpen] = useState(true)
-  const [q, setQ] = useState('')
-  const [onlySelected, setOnlySelected] = useState(false)
-
-  const selectedCount = options.filter(o => selected.has(o.value)).length
-
-  // Unchecking the last value while filtered to selections would strand the user
-  // on an empty list, so drop back to showing everything.
-  useEffect(() => {
-    if (onlySelected && selectedCount === 0) setOnlySelected(false)
-  }, [onlySelected, selectedCount])
-
-  const searched = q ? options.filter(o => o.value.toLowerCase().includes(q.toLowerCase())) : options
-  const shown = onlySelected ? searched.filter(o => selected.has(o.value)) : searched
-  const scrollable = shown.length > FACET_VISIBLE_ROWS
-
-  return (
-    <div className="facet-group">
-      <div className="facet-head" onClick={() => setOpen(o => !o)}>
-        <div>
-          <div className="facet-title">{title}</div>
-          <div className="facet-meta">
-            <div className="facet-meta-left">
-              <span>{options.length} total ·</span>
-              {selectedCount === 0 ? (
-                <span>{selectedCount} selected</span>
-              ) : (
-                <button
-                  type="button"
-                  className={`facet-sel-toggle${onlySelected ? ' on' : ''}`}
-                  aria-pressed={onlySelected}
-                  title={onlySelected
-                    ? `Showing only selected — click to show all ${options.length} values`
-                    : `Show only the ${selectedCount} selected value${selectedCount === 1 ? '' : 's'}`}
-                  onClick={(e) => { e.stopPropagation(); setOpen(true); setOnlySelected(v => !v) }}
-                >
-                  {selectedCount} selected
-                  {onlySelected ? (
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                  )}
-                </button>
-              )}
-            </div>
-            {selectedCount > 0 && (
-              <button
-                type="button"
-                className="facet-clear-btn-meta"
-                title="Clear selected"
-                onClick={(e) => { e.stopPropagation(); [...selected].forEach(v => onToggle(title, v)) }}
-              >
-                <span>Clear</span>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
-            )}
-          </div>
-        </div>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={`facet-chev${open ? ' open' : ''}`}><path d="M6 9l6 6 6-6"/></svg>
-      </div>
-      {open && (
-        <>
-          <div className="facet-search">
-            <input placeholder="search…" value={q} onChange={e => setQ(e.target.value)} />
-          </div>
-          <div className={`facet-list${scrollable ? ' scrollable' : ''}`}>
-            {shown.length === 0 && <div className="facet-none">No values match</div>}
-            {shown.map(o => (
-              <label key={o.value} className="facet-opt">
-                <input type="checkbox" checked={selected.has(o.value)} onChange={() => onToggle(title, o.value)} />
-                <span className="facet-opt-label" title={o.value}>{o.value}</span>
-                <span className="facet-opt-count">{o.count.toLocaleString()}</span>
-              </label>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
 // Every tag a record carries can be turned into a column, so the Fields
 // dropdown lists all of them rather than an arbitrary subset. Derived from the
 // rows rather than written out: the list was a hand-kept copy, and it silently
@@ -161,61 +76,6 @@ const EXTRA_FIELDS = [...new Set(logRows.flatMap(r => Object.keys(r.tags)))]
   .map(key => ({ key, label: key }))
 
 const DEFAULT_FIELDS = new Set()
-
-function FieldsDropdown({ activeFields, setActiveFields }) {
-  const [open, setOpen] = useState(false)
-  const [q, setQ] = useState('')
-  const ref = useRef(null)
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  const shown = q ? EXTRA_FIELDS.filter(f => f.label.toLowerCase().includes(q.toLowerCase())) : EXTRA_FIELDS
-  const count = activeFields.size
-
-  return (
-    <div className="fields-drop-wrap" ref={ref}>
-      <button className={`hbtn small${open ? ' active' : ''}`} onClick={() => setOpen(o => !o)}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-        Fields{count ? ` (${count})` : ''}
-      </button>
-      {open && (
-        <div className="fields-drop">
-          <div className="fields-drop-head">
-            <span>Fields ({count})</span>
-            <button
-              className="fields-drop-select-all"
-              onClick={() => setActiveFields(count === EXTRA_FIELDS.length ? new Set() : new Set(EXTRA_FIELDS.map(f => f.key)))}
-            >
-              {count === EXTRA_FIELDS.length ? 'Deselect all' : 'Select all'}
-            </button>
-          </div>
-          <div className="fields-drop-search">
-            <input placeholder="search" value={q} onChange={e => setQ(e.target.value)} />
-          </div>
-          {shown.map(f => (
-            <label key={f.key} className="fields-drop-opt">
-              <input
-                type="checkbox"
-                checked={activeFields.has(f.key)}
-                onChange={() => {
-                  const next = new Set(activeFields)
-                  if (next.has(f.key)) next.delete(f.key); else next.add(f.key)
-                  setActiveFields(next)
-                }}
-              />
-              {f.label}
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 const QUERY_HISTORY = (() => {
   const now = BASE_TIME.getTime()
@@ -235,16 +95,6 @@ const QUERY_HISTORY = (() => {
   ]
 })()
 
-function formatHistoryTime(d) {
-  const now = BASE_TIME.getTime()
-  const diff = now - d.getTime()
-  if (diff < 60000) return 'just now'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-  return `${Math.floor(diff / 86400000)}d ago`
-}
-
-
 // Long enough for a paragraph explaining when to reach for a query, short
 // enough that the panel stays a list of queries rather than of essays.
 // `maxLength` alone stops typing but not every paste, so the value is cut on
@@ -263,60 +113,6 @@ function truncate(text, max) {
 }
 
 
-
-function QueryHistoryDrawer({ onClose, onApply /*, savedNames, onToggleSave — disabled, kept for future restoration */ }) {
-  const [search, setSearch] = useState('')
-
-  const items = QUERY_HISTORY.filter(h => {
-    if (search && !h.query.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
-
-  return (
-    <div className="alert-drawer-overlay" onClick={onClose}>
-      <aside className="alert-drawer qh-drawer" onClick={e => e.stopPropagation()}>
-        <div className="alert-drawer-head">
-          <div>
-            <div className="alert-drawer-title">Query History</div>
-            <div className="alert-drawer-sub">Recent queries run on this workspace</div>
-          </div>
-          <button className="log-detail-close" onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
-        <div className="qh-toolbar">
-          <div className="qh-search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-            <input placeholder="Search queries…" value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
-          {/* Saved tab disabled — kept for future restoration
-          <div className="qh-tabs">
-            <button className={`qh-tab${tab === 'all' ? ' active' : ''}`} onClick={() => setTab('all')}>All</button>
-            <button className={`qh-tab${tab === 'saved' ? ' active' : ''}`} onClick={() => setTab('saved')}>Saved</button>
-          </div>
-          */}
-        </div>
-        <div className="qh-list">
-          {items.length === 0 && (
-            <div className="qh-empty">No queries match your search</div>
-          )}
-          {items.map(h => (
-              <div key={h.id} className="qh-item" onClick={() => onApply(h.query)}>
-                <div className="qh-item-top">
-                  <code className="qh-item-query">{h.query}</code>
-                  <span className="qh-item-time">{formatHistoryTime(h.time)}</span>
-                </div>
-
-                <div className="qh-item-meta">
-                  <span className="qh-item-results">{h.results.toLocaleString()} results</span>
-                </div>
-              </div>
-          ))}
-        </div>
-      </aside>
-    </div>
-  )
-}
 
 function PatternsDrawer({ onClose }) {
   return (
@@ -421,73 +217,6 @@ function downloadCSV(rows) {
   a.href = url; a.download = `logs-${Date.now()}.csv`; a.click()
   URL.revokeObjectURL(url)
 }
-
-function AlertDrawer({ filters, query, onClose }) {
-  const activeFilters = Object.entries(filters).filter(([, s]) => s?.size)
-  return (
-    <div className="alert-drawer-overlay" onClick={onClose}>
-      <aside className="alert-drawer" onClick={e => e.stopPropagation()}>
-        <div className="alert-drawer-head">
-          <div>
-            <div className="alert-drawer-title">Create Alert</div>
-            <div className="alert-drawer-sub">Alert fires when this query exceeds a threshold</div>
-          </div>
-          <button className="log-detail-close" onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
-        <div className="alert-drawer-body">
-          <div className="alert-field">
-            <label className="alert-label">Query</label>
-            <div className="alert-value mono">{query || <span style={{ color: 'var(--text-muted)' }}>All logs</span>}</div>
-          </div>
-          {activeFilters.length > 0 && (
-            <div className="alert-field">
-              <label className="alert-label">Active filters</label>
-              <div className="alert-filters">
-                {activeFilters.map(([k, s]) => (
-                  <div key={k} className="alert-filter-row">
-                    <span className="alert-filter-key">{k}</span>
-                    <span className="alert-filter-vals">{[...s].join(', ')}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="alert-field">
-            <label className="alert-label">Condition</label>
-            <div className="alert-row">
-              <select className="alert-select"><option>Count</option><option>Error rate</option></select>
-              <select className="alert-select"><option>is above</option><option>is below</option></select>
-              <input className="alert-input" type="number" defaultValue={100} />
-            </div>
-          </div>
-          <div className="alert-field">
-            <label className="alert-label">Evaluate every</label>
-            <div className="alert-row">
-              <select className="alert-select"><option>1 minute</option><option>5 minutes</option><option>15 minutes</option></select>
-              <span className="alert-label" style={{ margin: 0 }}>for</span>
-              <select className="alert-select"><option>1 minute</option><option>5 minutes</option></select>
-            </div>
-          </div>
-          <div className="alert-field">
-            <label className="alert-label">Alert name</label>
-            <input className="alert-input wide" type="text" placeholder="e.g. High error rate on payment-service" />
-          </div>
-          <div className="alert-field">
-            <label className="alert-label">Notify via</label>
-            <select className="alert-select wide"><option>Email</option><option>Slack</option><option>PagerDuty</option><option>Webhook</option></select>
-          </div>
-        </div>
-        <div className="alert-drawer-foot">
-          <button className="alert-btn-cancel" onClick={onClose}>Cancel</button>
-          <button className="alert-btn-create" onClick={onClose}>Create Alert</button>
-        </div>
-      </aside>
-    </div>
-  )
-}
-
 
 export default function LogsView({ goHome, timeRange, setTimeRange, setToast, onOpenLink, incomingChip, onIncomingChipApplied }) {
   const [filters, setFilters] = useState({})
@@ -1599,7 +1328,7 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
               Top Patterns
             </button>
-            <FieldsDropdown activeFields={activeFields} setActiveFields={setActiveFields} />
+            <FieldsDropdown fields={EXTRA_FIELDS} activeFields={activeFields} setActiveFields={setActiveFields} />
             <div className="live-toggle">
             <button
               className={`live-btn${live === 'on' ? ' active' : live === 'pause' ? ' paused' : ''}`}
@@ -1765,7 +1494,14 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
       )}
       </div>
     </div>
-    {alertOpen && <AlertDrawer filters={filters} query={query} onClose={() => setAlertOpen(false)} />}
+    {alertOpen && (
+      <AlertDrawer
+        filters={filters}
+        query={query}
+        onClose={() => setAlertOpen(false)}
+        emptyLabel="All logs"
+      />
+    )}
     {patternsOpen && <PatternsDrawer onClose={() => setPatternsOpen(false)} />}
     {myQueriesOpen && (
       <MyQueriesDrawer
@@ -1777,6 +1513,8 @@ export default function LogsView({ goHome, timeRange, setTimeRange, setToast, on
     )}
     {historyOpen && (
       <QueryHistoryDrawer
+        history={QUERY_HISTORY}
+        subject="workspace"
         onClose={() => setHistoryOpen(false)}
         onApply={applyHistoryQuery}
       />

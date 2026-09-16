@@ -8,6 +8,7 @@ import InfraIcon from '@/components/layout/InfraIcons'
 import HomePage from '@/pages/HomePage'
 import ServiceOverview from '@/pages/ServiceOverview'
 import LogsView from '@/pages/LogsView'
+import TracesView from '@/pages/TracesView'
 import InfraView from '@/pages/InfraView'
 import TraceDetail from '@/pages/TraceDetail'
 import LoginPage from '@/pages/LoginPage'
@@ -50,6 +51,7 @@ export default function App() {
   const [view, setView] = useState(() => {
     const path = location.pathname
     if (path === '/logs') return 'logs'
+    if (path === '/traces') return 'traces'
     if (path === '/infrastructure') return 'infra'
     if (path.startsWith('/trace/')) return 'trace'
     if (path.startsWith('/service/')) return 'service'
@@ -58,6 +60,7 @@ export default function App() {
   const [serviceId, setServiceId] = useState('payment-service')
   const [traceId, setTraceId] = useState(() => location.pathname.split('/trace/')[1] ?? '')
   const [logsQuery, setLogsQuery] = useState(null)
+  const [tracesQuery, setTracesQuery] = useState(null)
   const [navCollapsed, setNavCollapsed] = useState(true)
   const [timeRange, setTimeRange] = useState('Last 1 hour')
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -161,6 +164,7 @@ export default function App() {
     if (isDesignSystem) return
     if (view === 'home') navigate('/home')
     else if (view === 'logs') navigate('/logs')
+    else if (view === 'traces') navigate('/traces')
     else if (view === 'infra') navigate('/infrastructure')
     else if (view === 'service' && serviceId) navigate(`/service/${serviceId}`)
     else if (view === 'trace' && traceId) navigate(`/trace/${traceId}`)
@@ -176,6 +180,7 @@ export default function App() {
 
   const isService = view === 'service'
   const isLogs = view === 'logs'
+  const isTraces = view === 'traces'
   const isInfra = view === 'infra'
   const isTrace = view === 'trace'
 
@@ -284,11 +289,20 @@ export default function App() {
                 key={traceId}
                 traceId={traceId}
                 goHome={goHome}
+                goTraces={() => setView('traces')}
                 goLogs={openLogsForTrace}
                 timeRange={timeRange}
                 setTimeRange={setTimeRange}
                 settingsOpen={settingsOpen}
                 setSettingsOpen={setSettingsOpen}
+              />
+            ) : isTraces ? (
+              <TracesView
+                goHome={goHome} timeRange={timeRange} setTimeRange={setTimeRange} setToast={setToast}
+                onOpenLink={openLink}
+                onOpenTrace={openTrace}
+                incomingChip={tracesQuery}
+                onIncomingChipApplied={() => setTracesQuery(null)}
               />
             ) : isLogs ? (
               <LogsView
