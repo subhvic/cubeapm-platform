@@ -1,16 +1,7 @@
 import { useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { TrendingDown, TrendingUp } from 'lucide-react'
-
-// Palette for chart series identity. Blues / purples / teals only — reds,
-// ambers, and greens stay reserved for severity per project rules.
-const PALETTE = [
-  '#3B82F6', '#8B5CF6', '#14B8A6', '#F472B6',
-  '#0EA5E9', '#A855F7', '#22D3EE', '#EC4899',
-  '#6366F1', '#06B6D4', '#818CF8', '#F59E0B',
-]
-
-function palette(i) { return PALETTE[i % PALETTE.length] }
+import { paletteColor as palette } from '@/utils/chartPalette'
 
 function formatValue(n) {
   if (n == null || !Number.isFinite(n)) return '—'

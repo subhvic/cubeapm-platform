@@ -65,10 +65,6 @@ export const FIELD_CATALOG = [
 
 const FIELD_BY_NAME = Object.fromEntries(FIELD_CATALOG.map(f => [f.field, f]))
 
-// Names that count as a field when typed. `_msg` is here so `_msg:"a b"` can be
-// written out in full, even though free text normally produces it implicitly.
-const TYPEABLE_FIELDS = [...FIELD_CATALOG.map(f => f.field), '_msg', '_time', '_stream']
-
 // Operator catalog — mirrors CubeAPM query grammar.
 // `sym` is what shows in the operator picker's icon slot.
 // `freeText` = user must type a value (no picklist).
@@ -107,16 +103,21 @@ const OPERATORS = {
 
 const CATEGORY_ORDER = ['Equality', 'List', 'Text', 'Pattern', 'Presence']
 
-function opSetFor(field) {
-  const meta = FIELD_BY_NAME[field]
+// The operator set a field gets is decided by its entry in the ACTIVE catalog,
+// which differs per dataset — `duration` is nanoseconds on a span and has no
+// entry at all on some log shapes. Callers inside the component pass the map
+// they resolved from their own dataset; the default keeps the module-level
+// helpers usable on their own.
+function opSetFor(field, byName = FIELD_BY_NAME) {
+  const meta = byName[field]
   if (!meta) return OPERATORS.string
   if (meta.highCard) return OPERATORS.highCard
   if (meta.type === 'keyword') return OPERATORS.keyword
   return OPERATORS.string
 }
 
-function opMetaFor(field, op) {
-  return opSetFor(field).find(o => o.op === op)
+function opMetaFor(field, op, byName = FIELD_BY_NAME) {
+  return opSetFor(field, byName).find(o => o.op === op)
 }
 
 // Renders the op+value portion of a chip using CubeAPM's canonical syntax.
@@ -253,12 +254,12 @@ export function getFieldValue(log, field) {
 // short enough that a deliberate stop feels immediate.
 const VALUE_DEBOUNCE_MS = 180
 
-function computeTopValues(field, k = 24) {
-  const meta = FIELD_BY_NAME[field]
+function computeTopValues(field, k = 24, { rows = logRows, byName = FIELD_BY_NAME, valueOf = getFieldValue } = {}) {
+  const meta = byName[field]
   if (meta?.highCard) return null
   const counts = {}
-  for (const l of logRows) {
-    const v = getFieldValue(l, field)
+  for (const l of rows) {
+    const v = valueOf(l, field)
     if (v != null && v !== '') {
       const key = String(v)
       counts[key] = (counts[key] || 0) + 1
@@ -355,8 +356,8 @@ function matchesPrefix(haystack, value) {
   return hl.startsWith(vl) || tokenize(haystack).some(t => t.startsWith(vl))
 }
 
-function matchChip(log, c) {
-  const raw = getFieldValue(log, c.field)
+function matchChip(log, c, valueOf = getFieldValue) {
+  const raw = valueOf(log, c.field)
   const present = raw != null && raw !== ''
   if (c.op === 'exists') return present
   if (c.op === 'empty')  return !present
@@ -383,29 +384,47 @@ function matchChip(log, c) {
 // Evaluates a sibling list left-to-right, respecting each node's `connector`
 // (default AND). There is still no operator precedence WITHIN a list — groups
 // are what express precedence, and users can reorder chips as before.
-function evalNodes(log, nodes) {
+function evalNodes(log, nodes, valueOf = getFieldValue) {
   if (!nodes?.length) return true
-  let result = evalNode(log, nodes[0])
+  let result = evalNode(log, nodes[0], valueOf)
   for (let i = 1; i < nodes.length; i++) {
     const n = nodes[i]
-    const m = evalNode(log, n)
+    const m = evalNode(log, n, valueOf)
     if (n.connector === 'OR') result = result || m
     else result = result && m
   }
   return result
 }
 
-function evalNode(log, n) {
-  return isGroup(n) ? evalNodes(log, n.children) : matchChip(log, n)
+function evalNode(log, n, valueOf = getFieldValue) {
+  return isGroup(n) ? evalNodes(log, n.children, valueOf) : matchChip(log, n, valueOf)
 }
 
-export function applyChipsToLog(log, chips) {
-  return evalNodes(log, chips)
+// `valueOf` is the same dataset seam the builder takes: a span resolves its
+// fields differently from a log line, and the chip semantics above are
+// identical either way. Defaulting it keeps every existing caller unchanged.
+export function applyChipsToLog(log, chips, valueOf = getFieldValue) {
+  return evalNodes(log, chips, valueOf)
 }
 
 // ---------- Component ----------
 
-export default function QueryBuilder({ chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onBlockedChange, onCopyQuery, parsePastedQuery, onApplyPipes, fetchFieldValues, leading }) {
+/**
+ * `fieldCatalog`, `rows` and `valueOf` are the dataset seam. Logs and Traces
+ * share one grammar, one keyboard model and one chip UI, and differ only in the
+ * nouns they can be written about — so the page supplies the vocabulary and this
+ * file stays the single definition of how a query is built.
+ */
+export default function QueryBuilder({
+  chips, setChips, recents = [], addRecent, savedQueries = [], onRun, onBlockedChange,
+  onCopyQuery, parsePastedQuery, onApplyPipes, fetchFieldValues, leading,
+  fieldCatalog = FIELD_CATALOG, rows = logRows, valueOf = getFieldValue,
+  placeholder = 'Type a field name (e.g. service, duration_ms) or free text',
+}) {
+  const fieldByName = useMemo(() => Object.fromEntries(fieldCatalog.map(f => [f.field, f])), [fieldCatalog])
+  // Names that count as a field when typed. `_msg` is here so `_msg:"a b"` can
+  // be written out in full, even though free text normally produces it implicitly.
+  const typeableFields = useMemo(() => [...fieldCatalog.map(f => f.field), '_msg', '_time', '_stream'], [fieldCatalog])
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   // null → field phase | { field, type, highCard } → operator phase | { …, op } → value phase
@@ -459,7 +478,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   }, [setChips])
 
   // Whether the value phase needs a typed value instead of a picklist
-  const opMeta = composing?.op ? opMetaFor(composing.field, composing.op) : null
+  const opMeta = composing?.op ? opMetaFor(composing.field, composing.op, fieldByName) : null
   const isMulti = !!opMeta?.multi
   const needsTypedValue = !!(!isMulti && (composing?.highCard || opMeta?.freeText))
 
@@ -509,7 +528,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   useEffect(() => {
     if (!valueField) return
     if (!fetchFieldValues) {
-      setValueSource({ status: 'ready', field: valueField, items: computeTopValues(valueField) || [], error: null })
+      setValueSource({ status: 'ready', field: valueField, items: computeTopValues(valueField, 24, { rows, byName: fieldByName, valueOf }) || [], error: null })
       return
     }
     let cancelled = false
@@ -542,7 +561,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     const q = text.trim().toLowerCase()
 
     if (phase === 'operator') {
-      const ops = opSetFor(composing.field)
+      const ops = opSetFor(composing.field, fieldByName)
       const filtered = q
         ? ops.filter(o => o.op.toLowerCase().includes(q) || o.label.toLowerCase().includes(q) || o.sym.toLowerCase().includes(q))
         : ops
@@ -587,7 +606,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     const sav = allSaved.filter(s =>
       !q || s.name.toLowerCase().includes(q) || chipsToString(s.chips).toLowerCase().includes(q)
     )
-    const fac = FIELD_CATALOG.filter(f =>
+    const fac = fieldCatalog.filter(f =>
       !q || f.field.toLowerCase().includes(q) || f.desc.toLowerCase().includes(q)
     )
     // Anything typed can also be searched against the log body instead — including
@@ -697,8 +716,8 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     e?.stopPropagation()
     const c = getAt(chips, path)
     if (!c || isGroup(c)) return
-    const meta = FIELD_BY_NAME[c.field]
-    const om = opMetaFor(c.field, c.op)
+    const meta = fieldByName[c.field]
+    const om = opMetaFor(c.field, c.op, fieldByName)
     setMenuPath(null)
     setEditingPath(path)
     setHighlight(0)
@@ -875,7 +894,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   // this only decides when to hand a resolved piece over to `composing`.
 
   const fieldMeta = (name) => {
-    const m = FIELD_BY_NAME[name]
+    const m = fieldByName[name]
     return { field: name, type: m?.type ?? 'string', highCard: !!m?.highCard }
   }
 
@@ -884,7 +903,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
   const advanceFromTyping = (raw) => {
     // Field slot: peel off `<known field><operator>` if that is what was typed.
     if (!composing) {
-      const sp = splitField(raw, TYPEABLE_FIELDS)
+      const sp = splitField(raw, typeableFields)
       if (!sp || !sp.rest) return false
       const r = resolveOperator(sp.rest)
       if (r.status === 'none') return false
@@ -931,8 +950,8 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
         : { kind: 'partial', label: 'field filter', field: composing.field }
     }
     if (composing) return { kind: 'partial', label: 'field filter', field: composing.field }
-    return interpret(text, TYPEABLE_FIELDS)
-  }, [text, composing])
+    return interpret(text, typeableFields)
+  }, [text, composing, typeableFields])
 
   // Commits whatever the buffer currently spells out. Returns false when there
   // is nothing complete to commit, so the caller can fall through.
@@ -987,7 +1006,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     // Field slot. A space straight after a complete field name opens the
     // in()/not_in() path rather than starting a free-text phrase — the one
     // place where a field name stops behaving like ordinary search text.
-    if (isKnownField(text, TYPEABLE_FIELDS)) {
+    if (isKnownField(text, typeableFields)) {
       setComposing(fieldMeta(text))
       setText(' ')
       setHighlight(0)
@@ -1173,7 +1192,8 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
     }
   }
 
-  const placeholder = phase === 'operator'
+  const idlePlaceholder = placeholder
+  const inputPlaceholder = phase === 'operator'
     ? `Choose an operator for ${composing.field}…`
     : phase === 'value'
       ? (isMulti
@@ -1187,7 +1207,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
         ? 'Pick a replacement field — Esc to cancel'
         : chips.length
           ? 'Add another filter'
-          : 'Type a field name (e.g. service, duration_ms) or free text'
+          : idlePlaceholder
 
   // Rendered either above or below the facet list depending on freeTextFirst, so
   // it's built once here rather than duplicated at both call sites.
@@ -1531,7 +1551,7 @@ export default function QueryBuilder({ chips, setChips, recents = [], addRecent,
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder={placeholder}
+          placeholder={inputPlaceholder}
           spellCheck={false}
           autoComplete="off"
         />

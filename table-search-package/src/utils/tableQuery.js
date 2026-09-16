@@ -28,9 +28,16 @@
 // flat, precedence-free chip list is a different contract for a different
 // input; matching it here would surprise more people than it would please.
 
-// A field is `{ name, key, tags? }`: what the user types, the row property it
-// reads, and — when the column carries tags — the row property holding them.
-// Name and key differ more often than not: the pod column is a row's `name`.
+// A field is `{ name, key, tags?, free? }`: what the user types, the row
+// property it reads, and — when the column carries tags — the row property
+// holding them. Name and key differ more often than not: the pod column is a
+// row's `name`.
+//
+// `free: false` keeps a field out of plain-text search while leaving it
+// addressable as `field:value`. A table with two or three columns wants every
+// one of them searched by a bare word; a set built from a record's fifty
+// attributes does not — free text would then match opaque ids and hashes, and
+// a search for "500" would return rows whose container id merely contains it.
 export const POD_FIELDS = [
   { name: 'pod', key: 'name', tags: 'labels' },
   { name: 'namespace', key: 'namespace' },
@@ -64,9 +71,19 @@ function resolveRef(raw, fields) {
 
 // "pod or namespace", "pod, namespace or node" — the phrasing an error uses to
 // say what it will accept.
+//
+// Capped, because the field set is not always a table's two or three columns:
+// searching a record's attributes there are dozens, and naming all of them
+// turns "unknown field" into a paragraph nobody reads. A handful plus a count
+// still says what shape a field name takes, which is the part that helps.
+const NAME_LIST_MAX = 6
+
 function listNames(fields) {
   const n = namesOf(fields)
   if (n.length <= 1) return n[0] ?? ''
+  if (n.length > NAME_LIST_MAX) {
+    return `${n.slice(0, NAME_LIST_MAX).join(', ')} and ${n.length - NAME_LIST_MAX} more`
+  }
   return `${n.slice(0, -1).join(', ')} or ${n[n.length - 1]}`
 }
 
@@ -375,7 +392,7 @@ export function matchesPod(node, row, fields = POD_FIELDS) {
     case 'union': return node.values.some(v => has(valueOf(row, fields, node.field, node.tag), v))
     // Free text reads the tags too. They are shown in the column, so a word
     // visible on screen that the search would not find reads as a broken box.
-    case 'free':  return fields.some(f =>
+    case 'free':  return fields.filter(f => f.free !== false).some(f =>
       has(valueOf(row, fields, f.name), node.value)
       || tagValuesOf(row, f).some(v => has(v, node.value)))
     default:      return true

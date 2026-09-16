@@ -377,6 +377,7 @@ export function LogRecordDrawer({
   index = 0, total = 0, onNavigate,
   pinned = [], onTogglePin, onOpenLink,
   initialView = 'fields',
+  badge,
 }) {
   const [view, setView] = useState(initialView)
   const [menu, setMenu] = useState(null)   // { field, value, x, y }
@@ -468,9 +469,13 @@ export function LogRecordDrawer({
       <div className="log-detail-head">
         <div className="log-detail-heading">
           <div className="log-detail-title-row">
+            {/* A log record's severity IS its level. A span's is its
+                status_code, and calling an ordinary span "Info" would state a
+                severity the span never claimed — so the caller can name the
+                badge, and only falls back to the level when it does not. */}
             <StatusBadge
-              status={statusForLogLevel(record.level)}
-              label={record.level.charAt(0).toUpperCase() + record.level.slice(1)}
+              status={badge?.status ?? statusForLogLevel(record.level)}
+              label={badge?.label ?? (record.level.charAt(0).toUpperCase() + record.level.slice(1))}
             />
             {/* A Kubernetes event stores the literal "UNSET" where a message
                 would go, so the shape and the built title are the only things

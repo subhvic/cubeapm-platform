@@ -1,9 +1,14 @@
 // The query variant of table search: several fields, a small query language,
 // and syntax colouring.
 //
-// The syntax is discoverable from the placeholder's worked example rather than
-// from a suggestion overlay — the field is one line of text, and a panel that
-// covered the rows being filtered cost more than it taught.
+// On a table the syntax is discoverable from the placeholder's worked example
+// alone: the field is one line of text, and a panel covering the rows being
+// filtered cost more than it taught. Where the field set is too large to name
+// in a placeholder — a record's attributes rather than a table's two columns —
+// `suggest` turns on an overlay listing the field names. It offers names and a
+// colon only, never values: the point is to say what can be searched, and a
+// list of values would be a second, longer list answering a question the person
+// has not asked yet.
 //
 // Its counterpart is TableSearch, which filters one field with plain text and
 // nothing else. Pick by how many fields the table can be searched on: one field
@@ -35,15 +40,18 @@ import { parsePodQuery, segmentQuery, placeholderFor, POD_FIELDS } from '@/utils
 // will never work does not sit there unexplained.
 const SETTLE_MS = 500
 
-export default function TableQuerySearch({ onApply, fields = POD_FIELDS }) {
+export default function TableQuerySearch({
+  onApply, fields = POD_FIELDS, suggest = false, status = null, placeholder: placeholderProp,
+}) {
   const [draft, setDraft] = useState('')
   // Whether typing has paused. Nothing is said about a broken query until it has.
   const [settled, setSettled] = useState(true)
   const [focused, setFocused] = useState(false)
+  const [caret, setCaret] = useState(0)
   const inputRef = useRef(null)
   const inkRef = useRef(null)
 
-  const placeholder = placeholderFor(fields)
+  const placeholder = placeholderProp ?? placeholderFor(fields)
   const typed = draft.trim()
   const parsed = parsePodQuery(draft, fields)
   const error = settled && !parsed.ok ? parsed.error : null
@@ -52,7 +60,7 @@ export default function TableQuerySearch({ onApply, fields = POD_FIELDS }) {
   const message = error && (!parsed.incomplete || !focused) ? error : null
 
   useEffect(() => {
-    if (parsed.ok) onApply(draft)
+    if (parsed.ok) onApply(draft, parsed.node)
   }, [draft, parsed.ok])   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -66,6 +74,41 @@ export default function TableQuerySearch({ onApply, fields = POD_FIELDS }) {
     setDraft('')
     setSettled(true)
     inputRef.current?.focus()
+  }
+
+  // The word the caret is in, when that word is still naming a field. Once a
+  // colon has been typed the person is choosing a value, and offering field
+  // names then would be answering the previous question.
+  const fieldFragment = (() => {
+    if (!suggest) return null
+    const head = draft.slice(0, caret)
+    const tok = head.split(/[\s()]+/).pop() ?? ''
+    if (tok.includes(':')) return null
+    return tok
+  })()
+
+  const suggestions = (() => {
+    if (fieldFragment == null) return []
+    const t = fieldFragment.toLowerCase()
+    const hit = fields.filter(f => !t || f.name.toLowerCase().includes(t))
+    // An exact, sole match is a field already named — nothing left to suggest.
+    if (hit.length === 1 && hit[0].name.toLowerCase() === t) return []
+    return hit.slice(0, 8)
+  })()
+
+  // Replaces the fragment under the caret with `name:`, leaving the rest of the
+  // query alone so a suggestion can be taken mid-expression.
+  const applySuggestion = (name) => {
+    const head = draft.slice(0, caret)
+    const frag = fieldFragment ?? ''
+    const next = `${head.slice(0, head.length - frag.length)}${name}:${draft.slice(caret)}`
+    setDraft(next)
+    const pos = head.length - frag.length + name.length + 1
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.setSelectionRange(pos, pos)
+      setCaret(pos)
+    })
   }
 
   // The ink layer does not scroll itself, so it follows the input's scroll to
@@ -96,9 +139,10 @@ export default function TableQuerySearch({ onApply, fields = POD_FIELDS }) {
             ref={inputRef}
             type="text"
             value={draft}
-            onChange={e => setDraft(e.target.value)}
+            onChange={e => { setDraft(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length) }}
+            onSelect={e => setCaret(e.target.selectionStart ?? 0)}
             onScroll={syncScroll}
-            onFocus={() => setFocused(true)}
+            onFocus={e => { setFocused(true); setCaret(e.target.selectionStart ?? 0) }}
             // Leaving is as final as the query gets: stop waiting on both counts.
             onBlur={() => { setFocused(false); setSettled(true) }}
             onKeyDown={e => {
@@ -119,8 +163,26 @@ export default function TableQuerySearch({ onApply, fields = POD_FIELDS }) {
         )}
       </div>
 
-      {message && <div className="pod-search-error" role="alert">{message}</div>}
+      {suggest && focused && suggestions.length > 0 && (
+        <div className="pod-search-suggest" role="listbox" aria-label="Fields">
+          {suggestions.map(f => (
+            <button
+              key={f.name}
+              type="button"
+              role="option"
+              aria-selected={false}
+              className="pod-search-suggest-item"
+              onMouseDown={e => { e.preventDefault(); applySuggestion(f.name) }}
+            >
+              <span className="pod-suggest-name">{f.name}</span>
+              <span className="pod-suggest-colon">:</span>
+            </button>
+          ))}
+        </div>
+      )}
 
+      {message && <div className="pod-search-error" role="alert">{message}</div>}
+      {status}
     </div>
   )
 }
