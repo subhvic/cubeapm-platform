@@ -1,4 +1,5 @@
 import { spanRows } from '@/data/tracesExplorer'
+import { isIdentityValue } from '@/data/observability'
 
 /**
  * The traces half of the query vocabulary.
@@ -212,4 +213,53 @@ export function spanSearchRow(span) {
     kind: span.kind,
     id: span.id,
   }
+}
+
+// A value list is only an answer where the values are readable ones. The test
+// that carries the weight is their SHAPE: a field whose every value is a
+// distinct id has nothing to suggest, however few there are, and that is what
+// isIdentityValue settles.
+//
+// The count is a backstop against an unbounded set rather than a judgement
+// about readability, so it is loose. The overlay shows eight at a time and
+// narrows as you type, which means a longer underlying list costs nothing —
+// and a tight cap silently dropped operation names, thirty of them on a
+// fan-out trace, which is exactly the field worth completing.
+const VALUE_MAX_DISTINCT = 60
+const VALUE_MAX_LEN = 48
+
+/**
+ * Suggestable values per field, most common first.
+ *
+ * Returns a lookup rather than a flat map so the caller can ask per field as
+ * the caret reaches one, and fields that fail the test simply have no entry.
+ */
+export function spanValueIndex(spans = []) {
+  const counts = new Map()
+  const add = (field, raw) => {
+    if (raw == null || raw === '') return
+    const v = String(raw)
+    if (v.length > VALUE_MAX_LEN) return
+    if (!counts.has(field)) counts.set(field, new Map())
+    const m = counts.get(field)
+    m.set(v, (m.get(v) || 0) + 1)
+  }
+
+  for (const sp of spans) {
+    add('span', sp.name)
+    add('service', sp.service)
+    add('kind', sp.kind)
+    for (const [k, v] of Object.entries(sp.tags ?? {})) add(k, v)
+  }
+
+  const out = {}
+  for (const [field, m] of counts) {
+    if (m.size > VALUE_MAX_DISTINCT) continue
+    const values = [...m.keys()]
+    if (values.every(isIdentityValue)) continue
+    out[field] = [...m.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([v]) => v)
+  }
+  return out
 }
