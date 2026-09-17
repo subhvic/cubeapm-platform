@@ -3711,13 +3711,6 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
    was rescuing. Separated, the labels sit on the plain surface and the bar can
    carry its full colour — and that colour is the service, which is the one
    thing about a span the row could not otherwise show at a glance. */
-.tw-legend {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
-  margin-bottom: 8px; font-size: 11px; color: var(--text-secondary);
-}
-.tw-legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.tw-legend-swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
-
 /* ---- waterfall search ----
    The field itself is TableQuerySearch, so the syntax, the colouring and the
    error handling are the table's. Only the counter beneath it is local. */
@@ -3751,8 +3744,11 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
   padding: 5px 8px; border: 0; border-radius: 4px; background: none; cursor: pointer;
   font-family: 'JetBrains Mono', monospace; font-size: 11.5px; text-align: left;
 }
-.pod-search-suggest-item:hover { background: var(--panel-2); }
+/* Hover and keyboard highlight are the same state, so the two ways of moving
+   through the list look the same rather than competing. */
+.pod-search-suggest-item.is-active { background: var(--panel-2); }
 .pod-suggest-name { color: var(--text-primary); }
+.pod-suggest-value { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pod-suggest-colon { color: var(--brand); font-weight: 600; }
 
 .tw-rows {

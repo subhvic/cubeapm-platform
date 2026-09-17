@@ -3,7 +3,7 @@ import PageBar from '@/components/layout/PageBar'
 import StatusBadge from '@/components/shared/StatusBadge'
 import { buildTrace, traceSummary, traceDatabase } from '@/data/traceDetail'
 import { colorForName } from '@/utils/chartPalette'
-import { spanSearchFields, spanSearchRow } from '@/utils/traceFields'
+import { spanSearchFields, spanSearchRow, spanValueIndex } from '@/utils/traceFields'
 import TableQuerySearch from '@/components/TableQuerySearch'
 import { matchesPod } from '@/utils/tableQuery'
 
@@ -142,16 +142,9 @@ function Waterfall({ trace, selected, onSelect, collapsed, onToggle, matchIds, c
 
   return (
     <>
-      {services.length > 1 && (
-        <div className="tw-legend">
-          {services.map(svc => (
-            <span key={svc} className="tw-legend-item">
-              <span className="tw-legend-swatch" style={{ background: colorForName(svc, services) }} />
-              {svc}
-            </span>
-          ))}
-        </div>
-      )}
+      {/* No legend: every row already names its service beside a dot in that
+          same colour, so a strip above the list repeated the key eight times
+          over without adding a reading of it. */}
       <div className="tw-rows" role="tree" aria-label="Trace waterfall">
         {visible.map(span => (
           <WaterfallRow
@@ -197,13 +190,14 @@ function SummaryTab({ trace }) {
     <table className="tw-table">
       <thead>
         <tr>
-          <th>Service</th><th>Operation</th>
+          <th>Operation</th><th>Service</th>
           <th className="num">Count</th><th className="num">Duration</th><th className="num">Duration %</th>
         </tr>
       </thead>
       <tbody>
         {shownRows.map(r => (
           <tr key={r.key}>
+            <td className="mono">{r.name}</td>
             {/* The dot is the same colour the service carries in the waterfall,
                 so "which service is slow" answers itself in one glance and the
                 answer survives the jump between the two views. */}
@@ -211,7 +205,6 @@ function SummaryTab({ trace }) {
               <span className="tw-svc-dot" style={{ background: colorForName(r.service, services) }} aria-hidden="true" />
               {r.service}
             </td>
-            <td className="mono">{r.name}</td>
             <td className="num mono">{r.count}</td>
             <td className="num mono">{msLabel(r.duration)}</td>
             <td className="num mono">{r.pct.toFixed(2)} %</td>
@@ -405,6 +398,8 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
   )
 
   const searchFields = useMemo(() => spanSearchFields(shown?.spans ?? []), [shown])
+  const valueIndex = useMemo(() => spanValueIndex(shown?.spans ?? []), [shown])
+  const valuesFor = useCallback(name => valueIndex[name] ?? null, [valueIndex])
 
   const matchList = useMemo(() => {
     if (!queryNode || !shown) return []
@@ -566,6 +561,7 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
               onApply={onSearch}
               fields={searchFields}
               suggest
+              valuesFor={valuesFor}
               placeholder="Search spans ( eg. service:payment-service AND http.status_code:500 )"
               status={queryText.trim() ? (
                 <div className="tw-search-status" role="status">

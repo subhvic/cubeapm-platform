@@ -33,7 +33,7 @@
 // not need telling. Leaving the field ends that grace — the query is as
 // finished as it is going to get, so it is worth saying what is wrong with it.
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { parsePodQuery, segmentQuery, placeholderFor, POD_FIELDS } from '@/utils/tableQuery'
 
 // Long enough to type a colon and keep going, short enough that a query that
@@ -42,13 +42,18 @@ const SETTLE_MS = 500
 
 export default function TableQuerySearch({
   onApply, fields = POD_FIELDS, suggest = false, status = null, placeholder: placeholderProp,
+  valuesFor,
 }) {
   const [draft, setDraft] = useState('')
   // Whether typing has paused. Nothing is said about a broken query until it has.
   const [settled, setSettled] = useState(true)
   const [focused, setFocused] = useState(false)
   const [caret, setCaret] = useState(0)
+  const [active, setActive] = useState(0)
+  // Escape closes the list without clearing the query; typing brings it back.
+  const [dismissed, setDismissed] = useState(false)
   const inputRef = useRef(null)
+  const listRef = useRef(null)
   const inkRef = useRef(null)
 
   const placeholder = placeholderProp ?? placeholderFor(fields)
@@ -79,37 +84,78 @@ export default function TableQuerySearch({
   // The word the caret is in, when that word is still naming a field. Once a
   // colon has been typed the person is choosing a value, and offering field
   // names then would be answering the previous question.
-  const fieldFragment = (() => {
+  // What the caret is in the middle of naming: a field, or a value for a field
+  // already named. The two are different questions and get different lists —
+  // offering field names after the colon would be answering the previous one.
+  //
+  // A value is recognised both as `field:frag` in one token and as a fragment
+  // sitting inside an open `field:(a OR …`, so the union form completes too.
+  const ctx = useMemo(() => {
     if (!suggest) return null
     const head = draft.slice(0, caret)
-    const tok = head.split(/[\s()]+/).pop() ?? ''
-    if (tok.includes(':')) return null
-    return tok
-  })()
+    const frag = /[^\s(),]*$/.exec(head)[0]
+    const before = head.slice(0, head.length - frag.length)
 
-  const suggestions = (() => {
-    if (fieldFragment == null) return []
-    const t = fieldFragment.toLowerCase()
-    const hit = fields.filter(f => !t || f.name.toLowerCase().includes(t))
-    // An exact, sole match is a field already named — nothing left to suggest.
-    if (hit.length === 1 && hit[0].name.toLowerCase() === t) return []
-    return hit.slice(0, 8)
-  })()
+    const colon = frag.indexOf(':')
+    if (colon !== -1) {
+      const field = fields.find(f => f.name === frag.slice(0, colon))
+      return field ? { mode: 'value', field, frag: frag.slice(colon + 1) } : null
+    }
+    // `service:`, `service:(`, `service:(redis OR ` — all still asking for a value.
+    const open = /([A-Za-z_][A-Za-z0-9_.]*):(\([^)]*)?$/.exec(before)
+    if (open) {
+      const field = fields.find(f => f.name === open[1])
+      if (field) return { mode: 'value', field, frag }
+    }
+    return { mode: 'field', frag }
+  }, [suggest, draft, caret, fields])
 
-  // Replaces the fragment under the caret with `name:`, leaving the rest of the
-  // query alone so a suggestion can be taken mid-expression.
-  const applySuggestion = (name) => {
+  const suggestions = useMemo(() => {
+    if (!ctx) return []
+    const t = ctx.frag.toLowerCase()
+    if (ctx.mode === 'field') {
+      const hit = fields.filter(f => !t || f.name.toLowerCase().includes(t))
+      // An exact, sole match is a field already named — nothing left to suggest.
+      if (hit.length === 1 && hit[0].name.toLowerCase() === t) return []
+      return hit.slice(0, 8).map(f => ({ key: f.name, text: f.name, tail: ':' }))
+    }
+    // Values are only offered where a list of them is a real answer. The caller
+    // decides that — a field whose every value is a distinct id has nothing to
+    // suggest, and saying so is more useful than listing a hundred of them.
+    const values = valuesFor?.(ctx.field.name)
+    if (!values?.length) return []
+    const hit = values.filter(v => !t || v.toLowerCase().includes(t))
+    if (hit.length === 1 && hit[0].toLowerCase() === t) return []
+    return hit.slice(0, 8).map(v => ({ key: v, text: v, value: true }))
+  }, [ctx, fields, valuesFor])
+
+  // Replaces the fragment under the caret, leaving the rest of the query alone
+  // so a suggestion can be taken mid-expression.
+  const applySuggestion = (item) => {
+    if (!ctx) return
     const head = draft.slice(0, caret)
-    const frag = fieldFragment ?? ''
-    const next = `${head.slice(0, head.length - frag.length)}${name}:${draft.slice(caret)}`
+    const insert = ctx.mode === 'field' ? `${item.text}:` : item.text
+    const start = head.length - ctx.frag.length
+    const next = `${head.slice(0, start)}${insert}${draft.slice(caret)}`
     setDraft(next)
-    const pos = head.length - frag.length + name.length + 1
+    const pos = start + insert.length
     window.requestAnimationFrame(() => {
       inputRef.current?.focus()
       inputRef.current?.setSelectionRange(pos, pos)
       setCaret(pos)
     })
   }
+
+  // A list that has changed under the cursor cannot keep its old position, so
+  // the highlight goes back to the top rather than to whatever now sits there.
+  useEffect(() => { setActive(0); setDismissed(false) }, [draft])
+  const open = suggest && focused && !dismissed && suggestions.length > 0
+  const activeIdx = Math.min(active, suggestions.length - 1)
+
+  useEffect(() => {
+    if (!open) return
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' })
+  }, [open, activeIdx])
 
   // The ink layer does not scroll itself, so it follows the input's scroll to
   // stay aligned once the text is longer than the field.
@@ -139,6 +185,11 @@ export default function TableQuerySearch({
             ref={inputRef}
             type="text"
             value={draft}
+            role={suggest ? 'combobox' : undefined}
+            aria-expanded={suggest ? open : undefined}
+            aria-controls={suggest ? 'pod-suggest-list' : undefined}
+            aria-activedescendant={open ? `pod-suggest-${activeIdx}` : undefined}
+            aria-autocomplete={suggest ? 'list' : undefined}
             onChange={e => { setDraft(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length) }}
             onSelect={e => setCaret(e.target.selectionStart ?? 0)}
             onScroll={syncScroll}
@@ -146,6 +197,30 @@ export default function TableQuerySearch({
             // Leaving is as final as the query gets: stop waiting on both counts.
             onBlur={() => { setFocused(false); setSettled(true) }}
             onKeyDown={e => {
+              // The overlay takes the arrows and Enter only while it is open and
+              // has something highlighted; otherwise every key means what it
+              // meant before, so the field does not change behaviour under you.
+              if (open) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setActive(i => (i + 1) % suggestions.length)
+                  return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setActive(i => (i - 1 + suggestions.length) % suggestions.length)
+                  return
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault()
+                  applySuggestion(suggestions[activeIdx])
+                  return
+                }
+                // One Escape dismisses the list; the query survives it. Clearing
+                // the field on the same key would throw away a query whose only
+                // problem was a panel covering the rows.
+                if (e.key === 'Escape') { e.preventDefault(); setDismissed(true); return }
+              }
               if (e.key === 'Enter') { e.preventDefault(); setSettled(true) }
               else if (e.key === 'Escape') clear()
             }}
@@ -163,19 +238,28 @@ export default function TableQuerySearch({
         )}
       </div>
 
-      {suggest && focused && suggestions.length > 0 && (
-        <div className="pod-search-suggest" role="listbox" aria-label="Fields">
-          {suggestions.map(f => (
+      {open && (
+        <div
+          className="pod-search-suggest"
+          role="listbox"
+          id="pod-suggest-list"
+          ref={listRef}
+          aria-label={ctx.mode === 'field' ? 'Fields' : `Values for ${ctx.field.name}`}
+        >
+          {suggestions.map((item, i) => (
             <button
-              key={f.name}
+              key={item.key}
+              id={`pod-suggest-${i}`}
               type="button"
               role="option"
-              aria-selected={false}
-              className="pod-search-suggest-item"
-              onMouseDown={e => { e.preventDefault(); applySuggestion(f.name) }}
+              aria-selected={i === activeIdx}
+              data-active={i === activeIdx}
+              className={`pod-search-suggest-item${i === activeIdx ? ' is-active' : ''}`}
+              onMouseEnter={() => setActive(i)}
+              onMouseDown={e => { e.preventDefault(); applySuggestion(item) }}
             >
-              <span className="pod-suggest-name">{f.name}</span>
-              <span className="pod-suggest-colon">:</span>
+              <span className={item.value ? 'pod-suggest-value' : 'pod-suggest-name'}>{item.text}</span>
+              {item.tail && <span className="pod-suggest-colon">{item.tail}</span>}
             </button>
           ))}
         </div>

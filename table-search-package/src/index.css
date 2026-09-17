@@ -622,6 +622,27 @@ tr.svc-empty-row td {
   margin-top: 5px; font-size: 10.5px; color: var(--critical-fg); font-weight: 400;
 }
 
+/* Field/value overlay. Only rendered when the field is given `suggest`, which
+   is off by default — but the component ships the capability, so the styles
+   have to ship with it or turning it on gets you an unstyled panel. */
+.pod-search-suggest {
+  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0;
+  min-width: 220px; max-height: 232px; overflow-y: auto;
+  background: var(--raised); border: 1px solid var(--border-panel); border-radius: 6px;
+  padding: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+}
+.pod-search-suggest-item {
+  display: flex; align-items: baseline; gap: 1px; width: 100%;
+  padding: 5px 8px; border: 0; border-radius: 4px; background: none; cursor: pointer;
+  font-family: 'JetBrains Mono', monospace; font-size: 11.5px; text-align: left;
+}
+/* Hover and keyboard highlight are the same state, so the two ways of moving
+   through the list look the same rather than competing. */
+.pod-search-suggest-item.is-active { background: var(--panel-2); }
+.pod-suggest-name { color: var(--text-primary); }
+.pod-suggest-value { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pod-suggest-colon { color: var(--brand); font-weight: 600; }
+
 .pod-empty-row {
   padding: 28px 16px; text-align: center;
   color: var(--text-muted); font-size: 12px;
