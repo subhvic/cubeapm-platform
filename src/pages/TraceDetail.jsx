@@ -13,6 +13,11 @@ const TABS = ['summary', 'database', 'errors']
 // expanded, a fan-out trace is a hundred-odd rows of leaf queries with the
 // shape of the request buried in them — and the shape is what a waterfall is
 // for. Small traces are legible whole, so they are left alone.
+// Enough of each pane to stay usable at the extremes of the drag: a couple of
+// table rows, and a few waterfall rows plus its header and search.
+const TABLES_MIN_PX = 96
+const WATERFALL_MIN_PX = 168
+
 const LARGE_TRACE = 40
 const AUTO_FOLD_DEPTH = 2
 
@@ -168,23 +173,9 @@ function Waterfall({ trace, selected, onSelect, collapsed, onToggle, matchIds, c
   )
 }
 
-// A summary is a claim about where the time went. Past a dozen or so rows it
-// stops being one: a fan-out trace produces seventy operations that each took
-// about a percent, and showing all of them puts a screen and a half of noise
-// between the reader and the waterfall. The tail is folded into one row that
-// says how much of the trace it accounts for, which is the only thing about it
-// worth reading at a glance.
-const SUMMARY_HEAD = 12
-
 function SummaryTab({ trace }) {
   const rows = useMemo(() => traceSummary(trace), [trace])
   const services = useMemo(() => [...new Set(trace.spans.map(s => s.service))], [trace.spans])
-  const [showAll, setShowAll] = useState(false)
-  const folded = !showAll && rows.length > SUMMARY_HEAD + 1
-  const shownRows = folded ? rows.slice(0, SUMMARY_HEAD) : rows
-  const tail = folded ? rows.slice(SUMMARY_HEAD) : []
-  const tailMs = tail.reduce((a, r) => a + r.duration, 0)
-  const tailPct = tail.reduce((a, r) => a + r.pct, 0)
   if (!rows.length) return <div className="tw-empty">This trace has a root span and nothing else.</div>
   return (
     <table className="tw-table">
@@ -195,7 +186,7 @@ function SummaryTab({ trace }) {
         </tr>
       </thead>
       <tbody>
-        {shownRows.map(r => (
+        {rows.map(r => (
           <tr key={r.key}>
             <td className="mono">{r.name}</td>
             {/* The dot is the same colour the service carries in the waterfall,
@@ -210,27 +201,6 @@ function SummaryTab({ trace }) {
             <td className="num mono">{r.pct.toFixed(2)} %</td>
           </tr>
         ))}
-        {folded && (
-          <tr className="tw-fold-row">
-            <td colSpan={2}>
-              <button type="button" className="tw-linkcell" onClick={() => setShowAll(true)}>
-                Show {tail.length} more operation{tail.length === 1 ? '' : 's'}
-              </button>
-            </td>
-            <td className="num mono">{tail.reduce((a, r) => a + r.count, 0)}</td>
-            <td className="num mono">{msLabel(tailMs)}</td>
-            <td className="num mono">{tailPct.toFixed(2)} %</td>
-          </tr>
-        )}
-        {showAll && rows.length > SUMMARY_HEAD + 1 && (
-          <tr className="tw-fold-row">
-            <td colSpan={5}>
-              <button type="button" className="tw-linkcell" onClick={() => setShowAll(false)}>
-                Show top {SUMMARY_HEAD} only
-              </button>
-            </td>
-          </tr>
-        )}
       </tbody>
     </table>
   )
@@ -346,6 +316,14 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
   const trace = useMemo(() => buildTrace(traceId), [traceId])
   const [selectedId, setSelectedId] = useState(null)
   const [tab, setTab] = useState('summary')
+  // Height of the tables pane. The waterfall takes whatever is left, so one
+  // number describes the whole split.
+  const [tablePx, setTablePx] = useState(300)
+  const [dragging, setDragging] = useState(false)
+  const tablesRef = useRef(null)
+  const wfRef = useRef(null)
+  const dragRef = useRef(null)
+
   const [collapsed, setCollapsed] = useState(() => {
     const spans = trace?.spans ?? []
     if (spans.length <= LARGE_TRACE) return new Set()
@@ -378,6 +356,62 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
 
   const select = useCallback((s) => setSelectedId(s.id), [])
 
+  // Both panes need to stay usable at every position, so the clamp leaves room
+  // for a couple of table rows above and a few waterfall rows below rather than
+  // letting either collapse to nothing — a pane dragged shut looks like a bug,
+  // and there is no affordance left to drag it back open by.
+  const clampSplit = useCallback((px) => {
+    const tablesEl = tablesRef.current
+    const wfEl = wfRef.current
+    if (!tablesEl || !wfEl) return Math.max(TABLES_MIN_PX, px)
+    // Measured off the two panes rather than off the column that holds them:
+    // the column also carries the head, the tabs and the separator, and
+    // clamping against its full height let the waterfall be dragged down to
+    // 49px — the space those three occupy, handed to the tables twice.
+    const shared = tablesEl.getBoundingClientRect().height + wfEl.getBoundingClientRect().height
+    const max = Math.max(TABLES_MIN_PX, shared - WATERFALL_MIN_PX)
+    return Math.min(max, Math.max(TABLES_MIN_PX, px))
+  }, [])
+
+  const startSplitDrag = useCallback((e) => {
+    e.preventDefault()
+    dragRef.current = { startY: e.clientY, startPx: tablePx }
+    setDragging(true)
+    const onMove = (ev) => {
+      const { startY, startPx } = dragRef.current
+      setTablePx(clampSplit(startPx + (ev.clientY - startY)))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setDragging(false)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+  }, [tablePx, clampSplit])
+
+  // A separator that only answers the mouse is one a keyboard cannot move at
+  // all, and this one decides how much of the screen each half gets.
+  const onSplitKey = useCallback((e) => {
+    const step = e.shiftKey ? 80 : 24
+    if (e.key === 'ArrowUp') { e.preventDefault(); setTablePx(px => clampSplit(px - step)) }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setTablePx(px => clampSplit(px + step)) }
+    else if (e.key === 'Home') { e.preventDefault(); setTablePx(clampSplit(TABLES_MIN_PX)) }
+    else if (e.key === 'End') { e.preventDefault(); setTablePx(clampSplit(Number.MAX_SAFE_INTEGER)) }
+  }, [clampSplit])
+
+  // A window that shrank can leave the tables taller than the column they sit
+  // in, which would push the waterfall off the bottom with no way back.
+  useEffect(() => {
+    const onResize = () => setTablePx(px => clampSplit(px))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [clampSplit])
+
   const collapseAll = useCallback(() => {
     setCollapsed(new Set((trace?.spans ?? []).filter(sp => sp.childIds.length && sp.depth > 0).map(sp => sp.id)))
   }, [trace])
@@ -395,6 +429,15 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
   const visibleCount = useMemo(
     () => (shown ? visibleSpans(shown.spans, collapsed).length : 0),
     [shown, collapsed]
+  )
+  // How deep the call nests. Counted as levels rather than as the 0-based depth
+  // the rows carry, because a root on its own is one level of call, not zero —
+  // and it answers a different question from the span count: a hundred spans
+  // three levels deep is a fan-out, the same hundred twelve levels deep is a
+  // chain, and the two are read completely differently.
+  const depthCount = useMemo(
+    () => (shown?.spans.length ? Math.max(...shown.spans.map(sp => sp.depth)) + 1 : 0),
+    [shown]
   )
 
   const searchFields = useMemo(() => spanSearchFields(shown?.spans ?? []), [shown])
@@ -537,12 +580,33 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
               </button>
             ))}
           </div>
-          <div className="tw-left-body">
+          {/* The tables and the waterfall each scroll on their own, and the
+              separator between them decides how the height is split. Reading a
+              trace moves between the two — which operation is slow, then where
+              it sits in the call — and how much room each deserves depends on
+              the trace, so it is the reader's call rather than a fixed ratio. */}
+          <div className="tw-tables" ref={tablesRef} style={{ height: tablePx }}>
             <div className="tw-tabbody">
               {tab === 'summary' && <SummaryTab trace={shown} />}
               {tab === 'database' && <DatabaseTab trace={shown} />}
               {tab === 'errors' && <ErrorsTab trace={shown} onSelect={select} />}
             </div>
+          </div>
+
+          <div
+            className={`tw-split${dragging ? ' is-dragging' : ''}`}
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize the waterfall"
+            aria-valuenow={Math.round(tablePx)}
+            tabIndex={0}
+            onMouseDown={startSplitDrag}
+            onKeyDown={onSplitKey}
+          >
+            <span className="tw-split-grip" aria-hidden="true" />
+          </div>
+
+          <div className="tw-wf" ref={wfRef}>
             <div className="tw-wf-head">
               <span>Waterfall</span>
               {/* Saying how many rows are folded is what keeps an auto-folded
@@ -551,6 +615,7 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
                 {visibleCount === totalCount
                   ? `${totalCount} spans`
                   : `showing ${visibleCount} of ${totalCount} spans`}
+                {depthCount > 0 && ` · ${depthCount} level${depthCount === 1 ? '' : 's'} deep`}
               </span>
               <span className="tw-wf-actions">
                 <button type="button" onClick={expandAll} disabled={collapsed.size === 0}>Expand all</button>
@@ -581,16 +646,18 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
                 </div>
               ) : null}
             />
-            <Waterfall
-              trace={shown}
-              selected={span}
-              onSelect={select}
-              collapsed={collapsed}
-              onToggle={toggle}
-              matchIds={matchIds}
-              currentMatchId={currentMatch?.id ?? null}
-              rowRefs={rowRefs}
-            />
+            <div className="tw-wf-scroll">
+              <Waterfall
+                trace={shown}
+                selected={span}
+                onSelect={select}
+                collapsed={collapsed}
+                onToggle={toggle}
+                matchIds={matchIds}
+                currentMatchId={currentMatch?.id ?? null}
+                rowRefs={rowRefs}
+              />
+            </div>
           </div>
         </div>
         <SpanDetails span={span} trace={trace} />

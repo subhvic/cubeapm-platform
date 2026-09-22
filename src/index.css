@@ -435,7 +435,12 @@ a { color: inherit; }
 .crumb-select svg { width: 13px; height: 13px; color: var(--text-muted); transition: transform .12s; }
 .crumb-select.open svg { transform: rotate(180deg); color: var(--text-secondary); }
 /* When no tab-strip follows, the crumbs themselves provide the header/content divider */
-.card-crumbs:not(:has(+ .card-tab-strip)):not(:has(+ .logs-layout-stitched)) { border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; }
+.card-crumbs:not(:has(+ .card-tab-strip)):not(:has(+ .logs-layout-stitched)):not(:has(+ .tw-main)) { border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; }
+/* The trace view keeps the rule but not the gap under it: its own head follows
+   immediately and carries the spacing, so the 16px was being paid twice. Listed
+   as an exemption above rather than overridden below, because the chained
+   :not(:has()) there outweighs a plain .card-crumbs:has() on specificity. */
+.card-crumbs:has(+ .tw-main) { border-bottom: 1px solid var(--border-subtle); }
 /* Stitched variant — crumbs act as the header of the logs body, no visual gap */
 .card-crumbs:has(+ .logs-layout-stitched) {
   border-bottom: none;
@@ -3620,9 +3625,13 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 /* The panel is a peer of the scrolling column, not a block inside it, so it can
    stand its full height with a border of its own. min-height:0 on both is what
    lets each side scroll independently instead of the page growing to fit. */
+/* No vertical padding, and a negative bottom margin that reaches through the
+   card's own: the divider between the two columns is a full-height rule, and
+   padding above or below it leaves the line stopping short of the surface it
+   is supposed to divide. */
 .tw-main {
   display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px;
-  align-items: stretch; padding: 6px 0 4px;
+  align-items: stretch; padding: 0; margin-bottom: -8px;
   flex: 1; min-height: 0;
 }
 @media (max-width: 1100px) {
@@ -3630,10 +3639,55 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 }
 /* The two columns scroll independently: a long waterfall must not push the tag
    panel off the bottom of the page, and vice versa. Within the left column the
-   head is fixed and only the body below it moves. */
-.tw-left { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 0 4px; }
-.tw-left-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 0; }
-@media (max-width: 1100px) { .tw-left-body { overflow: visible; } }
+   head and tabs are fixed and the space below is split between two panes that
+   each scroll on their own. */
+.tw-left { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 20px 4px 0; }
+
+/* Height is set inline by the separator's drag; the waterfall takes the rest. */
+/* The sized box; the pane inside it does the scrolling. Both axes belong to
+   one element — with overflow-x here and overflow-y there, a sticky header
+   anchors to whichever established the nearest scroll container and stops
+   tracking the other. */
+.tw-tables { flex-shrink: 0; min-height: 0; overflow: hidden; padding-top: 12px; }
+.tw-wf { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 12px; }
+.tw-wf-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* The separator is a thin line with a generous grab area around it — a 1px
+   target is accurate to hit only by luck. The line is what you see; the padding
+   is what you catch. */
+.tw-split {
+  flex-shrink: 0; height: 11px; margin: 2px 0 16px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: row-resize; position: relative;
+}
+/* Spans the surface edge to edge: left to the card's own edge, right through
+   the grid gap to meet the vertical divider, so the two rules join instead of
+   the horizontal one stopping in mid-air short of either side.
+   -20px = the column's 4px padding plus the card's 16px; -18px = that 4px plus
+   the 14px grid gap. Both clear the padding box, so `overflow: hidden` on the
+   card does not cut them. */
+.tw-split::before {
+  content: ''; position: absolute; left: -20px; right: -18px; top: 50%;
+  height: 1px; background: var(--border-subtle);
+}
+@media (max-width: 1100px) { .tw-split::before { right: -4px; } }
+.tw-split-grip {
+  position: relative; width: 34px; height: 3px; border-radius: 2px;
+  background: var(--border-strong); opacity: 0; transition: opacity .12s;
+}
+.tw-split:hover .tw-split-grip,
+.tw-split:focus-visible .tw-split-grip,
+.tw-split.is-dragging .tw-split-grip { opacity: 1; }
+.tw-split.is-dragging::before, .tw-split:hover::before { background: var(--border-strong); }
+.tw-split:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 3px; }
+
+@media (max-width: 1100px) {
+  /* Splitting a column that is already scrolling as one gains nothing. */
+  .tw-tables { height: auto !important; overflow: visible; }
+  .tw-tabbody { height: auto; overflow-x: auto; overflow-y: visible; }
+  .tw-wf-scroll { overflow: visible; }
+  .tw-split { display: none; }
+}
 
 .tw-tabs { display: flex; gap: 2px; flex-shrink: 0; border-bottom: 1px solid var(--border-subtle); padding-top: 10px; }
 .tw-tab {
@@ -3650,7 +3704,7 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 }
 /* Wide tables get their own horizontal scroll rather than widening the column
    and pushing the span panel off the edge. */
-.tw-tabbody { margin-bottom: 22px; overflow-x: auto; }
+.tw-tabbody { height: 100%; overflow: auto; }
 
 .tw-wf-head {
   display: flex; align-items: baseline; gap: 10px;
@@ -3667,15 +3721,24 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .tw-wf-actions button:hover:not(:disabled) { background: var(--panel-2); color: var(--text-primary); }
 .tw-wf-actions button:disabled { opacity: .4; cursor: default; }
 
-/* The folded tail of the summary. Muted, because it is the part explicitly not
-   worth reading row by row — but it still carries its totals, so folding it
-   never hides how much of the trace it was. */
-.tw-fold-row td { color: var(--text-muted); background: color-mix(in srgb, var(--panel) 60%, transparent); }
 
-.tw-table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+/* `separate` rather than `collapse` because the header is sticky: a collapsed
+   border model hands the borders to the table, not the cells, and a sticky cell
+   then scrolls away from a border it no longer owns. Cells only carry a
+   bottom border here, so separating them doubles nothing. */
+.tw-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+/* Sticky because the pane it sits in scrolls now: seventy operations with the
+   column names scrolled off is a table you have to count across.
+   `border-top: 0` undoes the global `thead th` rule — the tabs above already
+   draw a line, and a second one right under it boxed the header row in. */
 .tw-table th {
-  text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border-panel);
+  text-align: left; padding: 7px 10px;
+  border-top: 0; border-bottom: 1px solid var(--border-panel);
   color: var(--text-muted); font-weight: 500; font-size: 11px; white-space: nowrap;
+  position: sticky; top: 0; z-index: 2; background: var(--card);
 }
 /* A global `td` rule right-aligns every cell and forbids wrapping. That is
    right for the dense metric tables it was written for and wrong here, where
@@ -3717,7 +3780,7 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 
 /* Scoped to this instance: .pod-search-wrap also sits above the infra and
    service tables, where the spacing is already settled. */
-.tw-left-body > .pod-search-wrap { margin-bottom: 8px; }
+.tw-wf > .pod-search-wrap { margin-bottom: 8px; }
 .tw-search-status {
   display: flex; align-items: center; gap: 10px; margin-top: 6px;
   font-size: 11px; color: var(--text-secondary);
@@ -3831,9 +3894,13 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 /* ---- span details ----
    Its own card: all four borders, full height of the row, and it scrolls
    internally so a span with fifty tags never stretches the page. */
+/* A dividing line rather than a card. The panel is not a separate object on the
+   page — it is the rest of the row you are already reading — so a box around it
+   drew an edge where there is no boundary, and a second rounded rectangle
+   inside the one surface card the whole app sits on. */
 .tw-side {
   display: flex; flex-direction: column; min-height: 0;
-  border: 1px solid var(--border-subtle); border-radius: 8px;
+  border-left: 1px solid var(--border-subtle);
   padding: 14px 0 0; overflow: hidden;
 }
 @media (max-width: 1100px) { .tw-side { max-height: 560px; } }
