@@ -173,7 +173,7 @@ function Waterfall({ trace, selected, onSelect, collapsed, onToggle, matchIds, c
   )
 }
 
-function SummaryTab({ trace }) {
+function SummaryTab({ trace, onFocus }) {
   const rows = useMemo(() => traceSummary(trace), [trace])
   const services = useMemo(() => [...new Set(trace.spans.map(s => s.service))], [trace.spans])
   if (!rows.length) return <div className="tw-empty">This trace has a root span and nothing else.</div>
@@ -187,7 +187,17 @@ function SummaryTab({ trace }) {
       </thead>
       <tbody>
         {rows.map(r => (
-          <tr key={r.key}>
+          <tr
+            key={r.key}
+            className="tw-row-link"
+            onClick={() => onFocus(r.slowestId)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onFocus(r.slowestId) } }}
+            title={r.count > 1
+              ? `Show the slowest of the ${r.count} ${r.name} spans in the waterfall`
+              : `Show ${r.name} in the waterfall`}
+          >
             <td className="mono">{r.name}</td>
             {/* The dot is the same colour the service carries in the waterfall,
                 so "which service is slow" answers itself in one glance and the
@@ -206,11 +216,11 @@ function SummaryTab({ trace }) {
   )
 }
 
-function DatabaseTab({ trace }) {
+function DatabaseTab({ trace, onFocus }) {
   const rows = useMemo(() => traceDatabase(trace), [trace])
   if (!rows.length) return <div className="tw-empty">No database calls in this trace.</div>
   return (
-    <table className="tw-table">
+    <table className="tw-table tw-table-db">
       <thead>
         <tr>
           <th className="num">Total Duration</th><th className="num">Avg Duration</th><th className="num">Max Duration</th>
@@ -226,7 +236,18 @@ function DatabaseTab({ trace }) {
             <td className="num mono">{r.count}</td>
             <td className="mono">{r.database}</td>
             <td className="mono dim">{r.instance}</td>
-            <td className="mono tw-stmt">{r.query}</td>
+            <td className="mono tw-stmt">
+              <button
+                type="button"
+                className="tw-linkcell"
+                onClick={() => onFocus(r.slowestId)}
+                title={r.count > 1
+                  ? `Show the slowest of the ${r.count} calls in the waterfall`
+                  : 'Show this call in the waterfall'}
+              >
+                {r.query}
+              </button>
+            </td>
           </tr>
         ))}
       </tbody>
@@ -234,7 +255,7 @@ function DatabaseTab({ trace }) {
   )
 }
 
-function ErrorsTab({ trace, onSelect }) {
+function ErrorsTab({ trace, onFocus }) {
   if (!trace.errors.length) return <div className="tw-empty">No span in this trace failed.</div>
   return (
     <table className="tw-table">
@@ -245,7 +266,12 @@ function ErrorsTab({ trace, onSelect }) {
             {/* The row is the fastest way from "something failed" to the span
                 that failed, so it selects it in the waterfall. */}
             <td className="mono">
-              <button type="button" className="tw-linkcell" onClick={() => onSelect(s)}>
+              <button
+                type="button"
+                className="tw-linkcell"
+                onClick={() => onFocus(s.id)}
+                title="Show this span in the waterfall"
+              >
                 {s.name} <span className="tw-kind">({s.kind})</span>
               </button>
             </td>
@@ -320,8 +346,9 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
   // number describes the whole split.
   const [tablePx, setTablePx] = useState(300)
   const [dragging, setDragging] = useState(false)
+  const leftRef = useRef(null)
   const tablesRef = useRef(null)
-  const wfRef = useRef(null)
+  const splitRef = useRef(null)
   const dragRef = useRef(null)
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -335,6 +362,8 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
   const [queryNode, setQueryNode] = useState(null)
   const [queryText, setQueryText] = useState('')
   const [matchIdx, setMatchIdx] = useState(0)
+  // The span the waterfall should reveal and scroll to, whoever asked for it.
+  const [revealId, setRevealId] = useState(null)
   const rowRefs = useRef({})
 
   const onSearch = useCallback((text, node) => {
@@ -356,20 +385,38 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
 
   const select = useCallback((s) => setSelectedId(s.id), [])
 
+  // What a table row does: select the span, unfold whatever hides it, scroll to
+  // it. A row that stands for several spans hands over the slowest, which is
+  // the one it earned its place in the table with.
+  const focusSpan = useCallback((id) => {
+    if (!id) return
+    setSelectedId(id)
+    // Re-point even at the span already targeted, so clicking the same row
+    // twice scrolls back to it rather than doing nothing.
+    setRevealId(null)
+    window.requestAnimationFrame(() => setRevealId(id))
+  }, [])
+
   // Both panes need to stay usable at every position, so the clamp leaves room
   // for a couple of table rows above and a few waterfall rows below rather than
   // letting either collapse to nothing — a pane dragged shut looks like a bug,
   // and there is no affordance left to drag it back open by.
   const clampSplit = useCallback((px) => {
+    const leftEl = leftRef.current
     const tablesEl = tablesRef.current
-    const wfEl = wfRef.current
-    if (!tablesEl || !wfEl) return Math.max(TABLES_MIN_PX, px)
-    // Measured off the two panes rather than off the column that holds them:
-    // the column also carries the head, the tabs and the separator, and
-    // clamping against its full height let the waterfall be dragged down to
-    // 49px — the space those three occupy, handed to the tables twice.
-    const shared = tablesEl.getBoundingClientRect().height + wfEl.getBoundingClientRect().height
-    const max = Math.max(TABLES_MIN_PX, shared - WATERFALL_MIN_PX)
+    const splitEl = splitRef.current
+    if (!leftEl || !tablesEl || !splitEl) return Math.max(TABLES_MIN_PX, px)
+    // The column scrolls, so the waterfall is as tall as its rows and there is
+    // no shared pool to divide. What the tables pane must not do is take the
+    // whole visible column: dragged that far there is nothing left on screen to
+    // show a waterfall in, and the separator lands below the fold with it.
+    // Everything above the tables — the head and the tabs — is measured rather
+    // than assumed, which is why offsetTop is read instead of a constant.
+    const sc = getComputedStyle(splitEl)
+    const splitH = splitEl.getBoundingClientRect().height
+      + parseFloat(sc.marginTop) + parseFloat(sc.marginBottom)
+    const room = leftEl.clientHeight - tablesEl.offsetTop - splitH - WATERFALL_MIN_PX
+    const max = Math.max(TABLES_MIN_PX, room)
     return Math.min(max, Math.max(TABLES_MIN_PX, px))
   }, [])
 
@@ -467,14 +514,19 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
     })
   }, [matchList])
 
-  // A match inside a folded subtree is not on screen, so scrolling to it would
+  // Stepping through search results is one way of pointing at a span; clicking
+  // a row in any of the three tables is another. Both mean the same thing —
+  // show me this one — so they set the same target and share what follows.
+  useEffect(() => { if (currentMatch) setRevealId(currentMatch.id) }, [currentMatch])
+
+  // A span inside a folded subtree is not on screen, so scrolling to it would
   // scroll to nothing. Unfold its ancestors first.
   useEffect(() => {
-    if (!currentMatch || !shown) return
+    if (!revealId || !shown) return
     setCollapsed(prev => {
       if (prev.size === 0) return prev
       const next = new Set(prev)
-      let node = currentMatch
+      let node = shown.spans.find(sp => sp.id === revealId)
       let changed = false
       while (node?.parentId) {
         if (next.delete(node.parentId)) changed = true
@@ -482,14 +534,14 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
       }
       return changed ? next : prev
     })
-  }, [currentMatch, shown])
+  }, [revealId, shown])
 
-  // Bring the current match into view once it is actually rendered.
+  // Bring it into view once it is actually rendered.
   useEffect(() => {
-    if (!currentMatch) return
-    const el = rowRefs.current[currentMatch.id]
+    if (!revealId) return
+    const el = rowRefs.current[revealId]
     if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [currentMatch, collapsed])
+  }, [revealId, collapsed])
 
   // One hit identifies one span, so it selects it outright rather than waiting
   // to be stepped to — which is what makes pasting a span id a jump.
@@ -529,7 +581,7 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
       </PageBar>
 
       <div className="tw-main">
-        <div className="tw-left">
+        <div className="tw-left" ref={leftRef}>
           {/* The head sits in the left column rather than above both, so the
               span panel starts level with it instead of a header-height below.
               It stays put while the tabs and waterfall scroll under it. */}
@@ -587,13 +639,14 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
               the trace, so it is the reader's call rather than a fixed ratio. */}
           <div className="tw-tables" ref={tablesRef} style={{ height: tablePx }}>
             <div className="tw-tabbody">
-              {tab === 'summary' && <SummaryTab trace={shown} />}
-              {tab === 'database' && <DatabaseTab trace={shown} />}
-              {tab === 'errors' && <ErrorsTab trace={shown} onSelect={select} />}
+              {tab === 'summary' && <SummaryTab trace={shown} onFocus={focusSpan} />}
+              {tab === 'database' && <DatabaseTab trace={shown} onFocus={focusSpan} />}
+              {tab === 'errors' && <ErrorsTab trace={shown} onFocus={focusSpan} />}
             </div>
           </div>
 
           <div
+            ref={splitRef}
             className={`tw-split${dragging ? ' is-dragging' : ''}`}
             role="separator"
             aria-orientation="horizontal"
@@ -606,7 +659,7 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
             <span className="tw-split-grip" aria-hidden="true" />
           </div>
 
-          <div className="tw-wf" ref={wfRef}>
+          <div className="tw-wf">
             <div className="tw-wf-head">
               <span>Waterfall</span>
               {/* Saying how many rows are folded is what keeps an auto-folded

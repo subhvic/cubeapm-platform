@@ -199,8 +199,11 @@ export function traceSummary(trace) {
   for (const s of trace.spans) {
     if (s === trace.root) continue
     const key = `${s.service}\u0000${s.name}`
-    const e = byOp.get(key) ?? { key, service: s.service, name: s.name, count: 0, duration: 0, db: !!s.db }
+    const e = byOp.get(key) ?? { key, service: s.service, name: s.name, count: 0, duration: 0, db: !!s.db, slowestId: null, slowestMs: -1 }
     e.count++; e.duration += s.duration
+    // A row can stand for a dozen spans, so clicking it has to pick one. The
+    // slowest is the one the row got into the table for.
+    if (s.duration > e.slowestMs) { e.slowestMs = s.duration; e.slowestId = s.id }
     byOp.set(key, e)
   }
   return [...byOp.values()]
@@ -224,10 +227,11 @@ export function traceDatabase(trace) {
       key, query,
       database: name ? `${system}.${name}` : system,
       instance: [s.tags['net.peer.name'], s.tags['net.peer.port']].filter(Boolean).join(':'),
-      count: 0, total: 0, max: 0,
+      count: 0, total: 0, max: 0, slowestId: null,
     }
     e.count++
     e.total += s.duration
+    if (s.duration > e.max) e.slowestId = s.id
     e.max = Math.max(e.max, s.duration)
     byKey.set(key, e)
   }
