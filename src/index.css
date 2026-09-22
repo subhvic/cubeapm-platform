@@ -3641,16 +3641,24 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
    panel off the bottom of the page, and vice versa. Within the left column the
    head and tabs are fixed and the space below is split between two panes that
    each scroll on their own. */
-.tw-left { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 20px 4px 0; }
+/* The column scrolls as one. The tables pane keeps a set height because that is
+   what the separator resizes, but the waterfall is as tall as its rows — as a
+   flex child filling the leftover it left a screen of dead space under a short
+   trace, and that emptiness read as the trace having more to show. */
+.tw-left {
+  min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  overflow-y: auto; position: relative; padding: 20px 4px 0;
+}
 
-/* Height is set inline by the separator's drag; the waterfall takes the rest. */
+/* Height is set inline by the separator's drag: a fixed viewport onto the
+   table, scrolling inside itself. */
 /* The sized box; the pane inside it does the scrolling. Both axes belong to
    one element — with overflow-x here and overflow-y there, a sticky header
    anchors to whichever established the nearest scroll container and stops
    tracking the other. */
 .tw-tables { flex-shrink: 0; min-height: 0; overflow: hidden; padding-top: 12px; }
-.tw-wf { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 12px; }
-.tw-wf-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.tw-wf { flex: none; display: flex; flex-direction: column; padding-bottom: 12px; }
+.tw-wf-scroll { flex: none; }
 
 /* The separator is a thin line with a generous grab area around it — a 1px
    target is accurate to hit only by luck. The line is what you see; the padding
@@ -3682,10 +3690,11 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .tw-split:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 3px; }
 
 @media (max-width: 1100px) {
-  /* Splitting a column that is already scrolling as one gains nothing. */
+  /* Sizing a pane inside a column the page is already scrolling gains nothing,
+     so the split goes and everything sizes to content. */
+  .tw-left { overflow: visible; }
   .tw-tables { height: auto !important; overflow: visible; }
   .tw-tabbody { height: auto; overflow-x: auto; overflow-y: visible; }
-  .tw-wf-scroll { overflow: visible; }
   .tw-split { display: none; }
 }
 
@@ -3737,9 +3746,15 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .tw-table th {
   text-align: left; padding: 7px 10px;
   border-top: 0; border-bottom: 1px solid var(--border-panel);
-  color: var(--text-muted); font-weight: 500; font-size: 11px; white-space: nowrap;
+  color: var(--text-muted); font-weight: 500; font-size: 11px; line-height: 1.3;
   position: sticky; top: 0; z-index: 2; background: var(--card);
 }
+/* Headers wrap; the figures under them do not. Held on one line, "Total
+   Duration", "Avg Duration" and "Max Duration" claimed 332px between them and
+   left the instance endpoint 117 — the column names were setting the width of
+   columns holding six characters of milliseconds. */
+.tw-table th { white-space: normal; overflow-wrap: break-word; }
+.tw-table th.num { min-width: 58px; }
 /* A global `td` rule right-aligns every cell and forbids wrapping. That is
    right for the dense metric tables it was written for and wrong here, where
    most columns are text: it right-aligned the operation and query columns and
@@ -3751,13 +3766,25 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
   text-align: left; white-space: normal;
 }
 .tw-table tr:last-child td { border-bottom: none; }
-.tw-table .num { text-align: right; white-space: nowrap; }
+.tw-table .num { text-align: right; }
+.tw-table td.num { white-space: nowrap; }
+/* The database table reads left to right throughout. Its measure columns are
+   narrow and its headers wrap to two lines, so ragged-right figures under a
+   right-aligned two-line label were harder to tie to their column than the
+   decimal alignment was worth. `.num` still carries the nowrap. */
+.tw-table-db .num { text-align: left; }
 .tw-table .dim { color: var(--text-muted); }
 /* Both of these hold long unbroken strings — a connection endpoint and a SQL
    statement. Without an explicit wrap they overflow their cell and print on top
    of the next column instead of pushing it along. */
-.tw-stmt { min-width: 240px; max-width: 460px; }
+.tw-stmt { min-width: 200px; max-width: 460px; }
 .tw-table td.dim { max-width: 210px; }
+
+/* Instance carries a whole endpoint — host, region, service, port — and was
+   wrapping to four lines at 149px while Database sat on 140 to hold
+   "mysql.cubedemo". The width follows what each column actually has to say. */
+.tw-table-db td.dim { min-width: 250px; max-width: 300px; }
+.tw-table-db th:nth-child(5), .tw-table-db td:nth-child(5) { max-width: 116px; }
 .tw-table td.dim, .tw-stmt { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .tw-empty { padding: 18px 10px; color: var(--text-muted); font-size: 12.5px; }
 .tw-errtype { color: var(--critical); }
@@ -3766,6 +3793,13 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
   cursor: pointer; text-align: left; border-bottom: 1px dashed transparent;
 }
 .tw-linkcell:hover { color: var(--brand); border-bottom-color: var(--brand); }
+.tw-linkcell:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 2px; }
+
+/* A summary row points at a span, so the whole row is the target — the
+   operation name alone would be a small one in a row this wide. */
+.tw-row-link { cursor: pointer; }
+.tw-row-link:hover td { background: var(--panel); }
+.tw-row-link:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 
 /* ---- waterfall ----
    Label on the left, bar on the right. They were one layer, with the bar
