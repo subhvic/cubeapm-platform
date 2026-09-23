@@ -1,13 +1,22 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import PageBar from '@/components/layout/PageBar'
-import StatusBadge from '@/components/shared/StatusBadge'
+import { FileText, Database as DatabaseIcon, CircleAlert, Flame, Maximize2, Copy, X } from 'lucide-react'
 import { buildTrace, traceSummary, traceDatabase } from '@/data/traceDetail'
 import { colorForName } from '@/utils/chartPalette'
 import { spanSearchFields, spanSearchRow, spanValueIndex } from '@/utils/traceFields'
 import TableQuerySearch from '@/components/TableQuerySearch'
 import { matchesPod } from '@/utils/tableQuery'
 
-const TABS = ['summary', 'database', 'errors']
+/* The icon is a second handle on the tab, not decoration: at 12px the four
+   labels are one grey word each, and the shape is what the eye comes back to
+   after reading the table under them. Each is paired with its label — an icon
+   alone would be a guess. */
+const TABS = [
+  { id: 'summary', label: 'Summary', Icon: FileText },
+  { id: 'database', label: 'Database', Icon: DatabaseIcon },
+  { id: 'errors', label: 'Errors', Icon: CircleAlert },
+  { id: 'profiles', label: 'Profiles', Icon: Flame },
+]
 
 // Above this many spans a trace opens folded below the second level. Fully
 // expanded, a fan-out trace is a hundred-odd rows of leaf queries with the
@@ -50,24 +59,37 @@ function ErrorIcon() {
   )
 }
 
+/* The bar is laid across the row rather than into a column of its own, so the
+   timeline gets the full width instead of a third of it. A left gutter is held
+   back for the indent and the caret — without it a span starting at zero would
+   put colour under the one control on the row. */
+const TRACK_GUTTER_PCT = 10
+
 /**
  * One waterfall row.
  *
- * The label and the bar live in separate columns. Painting the bar behind the
- * whole row puts every label on a coloured ground — which either washes the
- * text out or forces a glow behind each glyph that blurs it. Neither is worth
- * the pixels saved, and a trace is read by scanning names and durations.
+ * The bar runs behind the label, the way the product draws it: the row IS the
+ * track. What that buys is resolution — a span is measured against the whole
+ * row instead of a narrow column, so two calls a few milliseconds apart are
+ * still visibly apart.
  *
- * With the text clear of it, the bar can carry its full colour, and that colour
- * says WHICH SERVICE the span ran in. Severity is deliberately not in it: a
- * span that failed is marked by the status chip, the exception icon and a red
- * edge on the row, so spending the bar on severity too would say the same thing
- * three times and leave the service unsaid.
+ * What it costs is a coloured ground under the text, and that was worth being
+ * careful about. The bar is a tint rather than a slab of colour, so the label
+ * keeps its full contrast reading straight through it. No glow behind the
+ * glyphs either — a halo blurs the text it is meant to rescue.
+ *
+ * The colour says WHICH SERVICE the span ran in. Severity is deliberately not
+ * in it: a span that failed is marked by the status chip, the exception icon
+ * and a red edge on the row, so spending the bar on severity too would say the
+ * same thing three times and leave the service unsaid.
  */
 function WaterfallRow({ span, trace, depth, expandable, expanded, selected, color, matched, current, rowRef, onToggle, onSelect }) {
   const startPct = trace.totalMs ? (span.start / trace.totalMs) * 100 : 0
   const endPct = trace.totalMs ? Math.min(100, ((span.start + span.duration) / trace.totalMs) * 100) : 0
   const width = Math.max(endPct - startPct, 0.5)
+  const track = 100 - TRACK_GUTTER_PCT
+  const barLeft = TRACK_GUTTER_PCT + (startPct * track) / 100
+  const barWidth = (width * track) / 100
 
   const status = span.httpStatus
   return (
@@ -80,6 +102,11 @@ function WaterfallRow({ span, trace, depth, expandable, expanded, selected, colo
       aria-current={selected || undefined}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(span) } }}
     >
+      <span
+        className="tw-bar"
+        style={{ left: `${barLeft}%`, width: `${barWidth}%`, '--bar-color': color }}
+        aria-hidden="true"
+      />
       <span className="tw-label">
         <span className="tw-row-indent" aria-hidden="true">
           {Array.from({ length: depth }, (_, i) => <span key={i} className="tw-guide" />)}
@@ -107,12 +134,6 @@ function WaterfallRow({ span, trace, depth, expandable, expanded, selected, colo
         <span className="tw-name">{span.name} <span className="tw-kind">({span.kind})</span></span>
       </span>
 
-      <span className="tw-track">
-        <span
-          className="tw-bar"
-          style={{ left: `${startPct}%`, width: `${width}%`, background: color }}
-        />
-      </span>
       <span className="tw-dur mono">{msLabel(span.duration)}</span>
     </div>
   )
@@ -218,36 +239,50 @@ function SummaryTab({ trace, onFocus }) {
 
 function DatabaseTab({ trace, onFocus }) {
   const rows = useMemo(() => traceDatabase(trace), [trace])
+  const services = useMemo(() => [...new Set(trace.spans.map(s => s.service))], [trace.spans])
   if (!rows.length) return <div className="tw-empty">No database calls in this trace.</div>
   return (
     <table className="tw-table tw-table-db">
       <thead>
         <tr>
-          <th className="num">Total Duration</th><th className="num">Avg Duration</th><th className="num">Max Duration</th>
-          <th className="num">Count</th><th>Database</th><th>Instance</th><th>Query</th>
+          <th className="num tw-dbdur">Duration</th>
+          <th className="num">Count</th><th>Service</th><th className="tw-db-name">Database</th><th>Instance</th><th>Query</th>
         </tr>
       </thead>
       <tbody>
         {rows.map(r => (
-          <tr key={r.key}>
-            <td className="num mono">{msLabel(r.total)}</td>
-            <td className="num mono">{msLabel(r.avg)}</td>
-            <td className="num mono">{msLabel(r.max)}</td>
-            <td className="num mono">{r.count}</td>
-            <td className="mono">{r.database}</td>
-            <td className="mono dim">{r.instance}</td>
-            <td className="mono tw-stmt">
-              <button
-                type="button"
-                className="tw-linkcell"
-                onClick={() => onFocus(r.slowestId)}
-                title={r.count > 1
-                  ? `Show the slowest of the ${r.count} calls in the waterfall`
-                  : 'Show this call in the waterfall'}
-              >
-                {r.query}
-              </button>
+          <tr
+            key={r.key}
+            className="tw-row-link"
+            onClick={() => onFocus(r.slowestId)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onFocus(r.slowestId) } }}
+            title={r.count > 1
+              ? `Show the slowest of the ${r.count} calls in the waterfall`
+              : 'Show this call in the waterfall'}
+          >
+            {/* One column, because the three were one measurement. Total is
+                the headline — it is what the rows are ranked by — with the
+                average and the worst call beneath it. All three are always
+                shown: hiding the pair on single-call rows saved a redundant
+                line and cost the reader any way of knowing the numbers were
+                still there. */}
+            <td className="num mono tw-dbdur">
+              <span className="tw-dbdur-total">{msLabel(r.total)}</span>
+              <span className="tw-dbdur-line"><span className="tw-dbdur-k">avg</span>{msLabel(r.avg)}</span>
+              <span className="tw-dbdur-line"><span className="tw-dbdur-k">max</span>{msLabel(r.max)}</span>
             </td>
+            <td className="num mono">{r.count}</td>
+            {/* Same dot as the waterfall and the summary: which service issued
+                the query is the first thing you ask of a slow one. */}
+            <td className="tw-svc-cell">
+              <span className="tw-svc-dot" style={{ background: colorForName(r.service, services) }} aria-hidden="true" />
+              {r.service}
+            </td>
+            <td className="mono tw-db-name">{r.database}</td>
+            <td className="mono dim">{r.instance}</td>
+            <td className="mono tw-stmt">{r.query}</td>
           </tr>
         ))}
       </tbody>
@@ -255,32 +290,154 @@ function DatabaseTab({ trace, onFocus }) {
   )
 }
 
-function ErrorsTab({ trace, onFocus }) {
+function ErrorsTab({ trace, onFocus, onOpenStack }) {
+  const services = useMemo(() => [...new Set(trace.spans.map(s => s.service))], [trace.spans])
   if (!trace.errors.length) return <div className="tw-empty">No span in this trace failed.</div>
   return (
     <table className="tw-table">
-      <thead><tr><th>Operation</th><th>Type</th><th>Message</th></tr></thead>
+      <thead><tr><th>Operation</th><th>Service</th><th>Type</th><th>Message</th></tr></thead>
       <tbody>
+        {/* The row is the fastest way from "something failed" to the span that
+            failed, so the whole row selects it in the waterfall — the message
+            is as good a thing to aim at as the operation. */}
         {trace.errors.map(s => (
-          <tr key={s.id}>
-            {/* The row is the fastest way from "something failed" to the span
-                that failed, so it selects it in the waterfall. */}
-            <td className="mono">
+          <tr
+            key={s.id}
+            className="tw-row-link"
+            onClick={() => onFocus(s.id)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onFocus(s.id) } }}
+            title="Show this span in the waterfall"
+          >
+            <td className="mono">{s.name} <span className="tw-kind">({s.kind})</span></td>
+            <td className="tw-svc-cell">
+              <span className="tw-svc-dot" style={{ background: colorForName(s.service, services) }} aria-hidden="true" />
+              {s.service}
+            </td>
+            {/* The row goes to the span; this cell goes to the stack trace.
+                Two destinations in one row need the second one to look like a
+                control, so the type carries the icon that says it opens. */}
+            <td className="mono tw-errtype">
               <button
                 type="button"
-                className="tw-linkcell"
-                onClick={() => onFocus(s.id)}
-                title="Show this span in the waterfall"
+                className="tw-stackbtn"
+                onClick={e => { e.stopPropagation(); onOpenStack(s) }}
+                title={`Show the full stack trace for ${s.exception.type}`}
               >
-                {s.name} <span className="tw-kind">({s.kind})</span>
+                <span>{s.exception.type}</span>
+                <Maximize2 size={11} strokeWidth={2.2} aria-hidden="true" />
               </button>
             </td>
-            <td className="mono tw-errtype">{s.exception.type}</td>
             <td className="mono">{s.exception.message}</td>
           </tr>
         ))}
       </tbody>
     </table>
+  )
+}
+
+/**
+ * The full stack trace for one failed span.
+ *
+ * A stack trace is the one piece of a span that cannot be read in a table cell
+ * or a side panel: it is forty lines wide and tall, and truncating it hides the
+ * frame that matters, which is rarely the first one. So it gets the screen.
+ *
+ * Copy is here because it is what anyone actually does with a stack trace next
+ * — paste it into a ticket or a search.
+ */
+function StackModal({ span, onClose }) {
+  const [copied, setCopied] = useState(false)
+  const closeRef = useRef(null)
+
+  useEffect(() => {
+    closeRef.current?.focus()
+    const onKey = e => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const stack = span.exception.stack || 'No stack trace was recorded on this span.'
+  const copy = () => {
+    try {
+      navigator.clipboard.writeText(`${span.exception.type}: ${span.exception.message}\n${stack}`)?.catch(() => {})
+    } catch (_) { /* clipboard blocked — the text is on screen either way */ }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1400)
+  }
+
+  return (
+    <div className="tw-modal-overlay" onClick={onClose}>
+      <div
+        className="tw-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Stack trace for ${span.name}`}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="tw-modal-head">
+          <div className="tw-modal-titles">
+            <div className="tw-modal-type mono">{span.exception.type}</div>
+            <div className="tw-modal-sub">
+              {span.service}
+              <span className="sep">&middot;</span>
+              <span className="mono">{span.name}</span>
+              <span className="sep">&middot;</span>
+              {msLabel(span.duration)}
+            </div>
+          </div>
+          <div className="tw-modal-acts">
+            <button type="button" className="tw-modal-copy" onClick={copy}>
+              <Copy size={12} strokeWidth={2} aria-hidden="true" />
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+            <button ref={closeRef} type="button" className="tw-modal-close" onClick={onClose} aria-label="Close">
+              <X size={15} strokeWidth={2} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        {span.exception.message && (
+          <div className="tw-modal-msg">{span.exception.message}</div>
+        )}
+        <pre className="tw-modal-stack mono">{stack}</pre>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Profiles.
+ *
+ * The control and the count are the product's; the body is empty because
+ * nothing in this build is producing profile records yet. That is the same
+ * state the playground is in, and it is a truthful one — a tab filled with
+ * invented flame data would be read as a measurement of this trace.
+ *
+ * `traceProfiles` in the data layer already does the rollup this will render:
+ * by function, charged to self time, narrowable to one span. Point the body at
+ * it when there is a profiler to point at.
+ */
+function ProfilesTab({ span, narrow, setNarrow }) {
+  return (
+    <div className="tw-prof">
+      <div className="tw-prof-head">
+        <label className={`tw-prof-narrow${span ? '' : ' is-off'}`}>
+          <input
+            type="checkbox"
+            checked={narrow && !!span}
+            disabled={!span}
+            onChange={e => setNarrow(e.target.checked)}
+          />
+          <span>Narrow to selected span</span>
+          {span
+            ? <span className="mono dim">({span.name})</span>
+            : <span className="dim">— pick a span in the waterfall</span>}
+        </label>
+        <span className="tw-prof-count">0 records</span>
+      </div>
+      <div className="tw-empty">No profile records overlap this trace.</div>
+    </div>
   )
 }
 
@@ -342,6 +499,10 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
   const trace = useMemo(() => buildTrace(traceId), [traceId])
   const [selectedId, setSelectedId] = useState(null)
   const [tab, setTab] = useState('summary')
+  // Lives here rather than in the tab so the choice survives a trip to the
+  // waterfall to pick a different span — which is the whole point of it.
+  const [narrowProfile, setNarrowProfile] = useState(false)
+  const [stackSpan, setStackSpan] = useState(null)
   // Height of the tables pane. The waterfall takes whatever is left, so one
   // number describes the whole split.
   const [tablePx, setTablePx] = useState(300)
@@ -473,15 +634,19 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
   }, [trace, fullTrace])
 
   const totalCount = shown?.spans.length ?? 0
+  const shownServiceCount = useMemo(
+    () => (shown ? new Set(shown.spans.map(sp => sp.service)).size : 0),
+    [shown]
+  )
   const visibleCount = useMemo(
     () => (shown ? visibleSpans(shown.spans, collapsed).length : 0),
     [shown, collapsed]
   )
-  // How deep the call nests. Counted as levels rather than as the 0-based depth
-  // the rows carry, because a root on its own is one level of call, not zero —
-  // and it answers a different question from the span count: a hundred spans
-  // three levels deep is a fan-out, the same hundred twelve levels deep is a
-  // chain, and the two are read completely differently.
+  // How deep the call nests. Counted from one rather than from the 0-based
+  // depth the rows carry, because a root on its own is one level of call, not
+  // zero — and it answers a different question from the span count: a hundred
+  // spans three deep is a fan-out, the same hundred twelve deep is a chain,
+  // and the two are read completely differently.
   const depthCount = useMemo(
     () => (shown?.spans.length ? Math.max(...shown.spans.map(sp => sp.depth)) + 1 : 0),
     [shown]
@@ -587,20 +752,14 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
               It stays put while the tabs and waterfall scroll under it. */}
           <div className="tw-head">
             <div className="tw-head-left">
-              {/* Status and identity read as one line: the badge answers "did
-                  this request work", the id answers "which request", and
-                  splitting them over two rows made the id look like a heading
-                  for the badge. */}
-              <div className="tw-head-id">
-                <StatusBadge status={trace.failed ? 'critical' : 'healthy'} label={trace.failed ? 'Error' : 'OK'} />
-                <h1 className="mono">{trace.traceId}</h1>
-              </div>
+              <h1 className="mono">{trace.traceId}</h1>
+              {/* Counts follow the Show Full Trace toggle. Reading the full
+                  trace's totals beside a waterfall showing one service's spans
+                  described a view that was not on screen. */}
               <div className="tw-head-sub">
-                {trace.spans.length} spans across {trace.services.length} service{trace.services.length === 1 ? '' : 's'}
-                <span className="sep">&middot;</span>
-                {msLabel(trace.totalMs)}
-                <span className="sep">&middot;</span>
                 {clockLabel(trace.startTime)}
+                <span className="sep">&middot;</span>
+                {totalCount} spans across {shownServiceCount} service{shownServiceCount === 1 ? '' : 's'}
               </div>
             </div>
             <div className="tw-head-actions">
@@ -624,11 +783,12 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
               a control that scrolls out of sight stops answering that the
               moment you start reading the thing it switched to. */}
           <div className="tw-tabs" role="tablist">
-            {TABS.map(t => (
-              <button key={t} role="tab" aria-selected={tab === t}
-                className={`tw-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-                {t[0].toUpperCase() + t.slice(1)}
-                {t === 'errors' && trace.failed && <span className="tw-tab-dot" />}
+            {TABS.map(({ id, label, Icon }) => (
+              <button key={id} role="tab" aria-selected={tab === id}
+                className={`tw-tab${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
+                <Icon size={13} strokeWidth={2} aria-hidden="true" />
+                {label}
+                {id === 'errors' && trace.failed && <span className="tw-tab-dot" />}
               </button>
             ))}
           </div>
@@ -641,7 +801,12 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
             <div className="tw-tabbody">
               {tab === 'summary' && <SummaryTab trace={shown} onFocus={focusSpan} />}
               {tab === 'database' && <DatabaseTab trace={shown} onFocus={focusSpan} />}
-              {tab === 'errors' && <ErrorsTab trace={shown} onFocus={focusSpan} />}
+              {tab === 'errors' && (
+                <ErrorsTab trace={shown} onFocus={focusSpan} onOpenStack={setStackSpan} />
+              )}
+              {tab === 'profiles' && (
+                <ProfilesTab span={span} narrow={narrowProfile} setNarrow={setNarrowProfile} />
+              )}
             </div>
           </div>
 
@@ -668,7 +833,7 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
                 {visibleCount === totalCount
                   ? `${totalCount} spans`
                   : `showing ${visibleCount} of ${totalCount} spans`}
-                {depthCount > 0 && ` · ${depthCount} level${depthCount === 1 ? '' : 's'} deep`}
+                {depthCount > 0 && ` · ${depthCount} depth`}
               </span>
               <span className="tw-wf-actions">
                 <button type="button" onClick={expandAll} disabled={collapsed.size === 0}>Expand all</button>
@@ -715,6 +880,7 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
         </div>
         <SpanDetails span={span} trace={trace} />
       </div>
+      {stackSpan && <StackModal span={stackSpan} onClose={() => setStackSpan(null)} />}
     </>
   )
 }
