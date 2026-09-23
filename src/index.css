@@ -3649,7 +3649,7 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
    short of the surface it divides. */
 .tw-left {
   min-width: 0; min-height: 0; display: flex; flex-direction: column;
-  overflow-y: auto; position: relative; padding: 20px 4px 0 20px;
+  overflow: hidden; position: relative; padding: 20px 4px 0 20px;
 }
 
 /* Height is set inline by the separator's drag: a fixed viewport onto the
@@ -3659,8 +3659,19 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
    anchors to whichever established the nearest scroll container and stops
    tracking the other. */
 .tw-tables { flex-shrink: 0; min-height: 0; overflow: hidden; padding-top: 12px; }
-.tw-wf { flex: none; display: flex; flex-direction: column; padding-bottom: 12px; }
-.tw-wf-scroll { flex: none; }
+/* The waterfall takes whatever the separator leaves and scrolls its rows
+   inside that, rather than growing until the whole column scrolls.
+   A column that scrolls as one carries the head, the tabs and the separator
+   off the top with it — so the control that sets the split, and the tabs that
+   say which table is open, leave the screen the moment you go looking down
+   the call tree. Keeping the scroll inside the rows leaves both in place and
+   makes the drag mean what it looks like it means: two panes sharing a fixed
+   height, not two stacked blocks on a long page. */
+.tw-wf { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding-bottom: 12px; }
+/* Both axes on the one element, for the reason given above .tw-tables: with
+   the axes split, `overflow-y` alone computes x to `auto` and hangs a
+   scrollbar under rows that never needed one. */
+.tw-wf-scroll { flex: 1 1 auto; min-height: 0; overflow: hidden auto; }
 
 /* The separator is a thin line with a generous grab area around it — a 1px
    target is accurate to hit only by luck. The line is what you see; the padding

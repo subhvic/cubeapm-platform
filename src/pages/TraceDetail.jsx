@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import PageBar from '@/components/layout/PageBar'
-import { FileText, Database as DatabaseIcon, CircleAlert, Flame, Maximize2, Copy, X } from 'lucide-react'
+import { FileText, Database as DatabaseIcon, CircleAlert, Flame, Maximize2, Copy, X, Download } from 'lucide-react'
 import { buildTrace, traceSummary, traceDatabase } from '@/data/traceDetail'
 import { colorForName } from '@/utils/chartPalette'
 import { spanSearchFields, spanSearchRow, spanValueIndex } from '@/utils/traceFields'
@@ -37,6 +37,9 @@ function msLabel(v) {
   if (v >= 100) return `${v.toFixed(1)} ms`
   return `${v.toFixed(2)} ms`
 }
+
+/** Nanosecond source, millisecond display — three places is the real floor. */
+const round3 = (n) => Math.round(n * 1000) / 1000
 
 function clockLabel(d) {
   const p = n => String(n).padStart(2, '0')
@@ -245,8 +248,9 @@ function DatabaseTab({ trace, onFocus }) {
     <table className="tw-table tw-table-db">
       <thead>
         <tr>
-          <th className="num tw-dbdur">Duration</th>
-          <th className="num">Count</th><th>Service</th><th className="tw-db-name">Database</th><th>Instance</th><th>Query</th>
+          <th>Query</th>
+          <th className="num tw-dbdur">Duration</th><th>Service</th><th className="num">Count</th>
+          <th className="tw-db-name">Database</th><th>Instance</th>
         </tr>
       </thead>
       <tbody>
@@ -262,6 +266,10 @@ function DatabaseTab({ trace, onFocus }) {
               ? `Show the slowest of the ${r.count} calls in the waterfall`
               : 'Show this call in the waterfall'}
           >
+            {/* The statement leads: it is what identifies the row. The
+                measures that follow are what you compare once you have found
+                the query you came for. */}
+            <td className="mono tw-stmt">{r.query}</td>
             {/* One column, because the three were one measurement. Total is
                 the headline — it is what the rows are ranked by — with the
                 average and the worst call beneath it. All three are always
@@ -273,16 +281,15 @@ function DatabaseTab({ trace, onFocus }) {
               <span className="tw-dbdur-line"><span className="tw-dbdur-k">avg</span>{msLabel(r.avg)}</span>
               <span className="tw-dbdur-line"><span className="tw-dbdur-k">max</span>{msLabel(r.max)}</span>
             </td>
-            <td className="num mono">{r.count}</td>
             {/* Same dot as the waterfall and the summary: which service issued
                 the query is the first thing you ask of a slow one. */}
             <td className="tw-svc-cell">
               <span className="tw-svc-dot" style={{ background: colorForName(r.service, services) }} aria-hidden="true" />
               {r.service}
             </td>
+            <td className="num mono">{r.count}</td>
             <td className="mono tw-db-name">{r.database}</td>
             <td className="mono dim">{r.instance}</td>
-            <td className="mono tw-stmt">{r.query}</td>
           </tr>
         ))}
       </tbody>
@@ -633,6 +640,23 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
     return { ...trace, spans, errors: trace.errors.filter(s => s.service === svc) }
   }, [trace, fullTrace])
 
+  // Errors is only offered when there is something in it. An always-present
+  // tab that usually says "no span in this trace failed" trains you to skip
+  // it, which is the one tab you want read on the day it has something.
+  //
+  // It follows the Show Full Trace toggle rather than the whole trace, so the
+  // tabs describe the waterfall on screen — the same rule the counts above
+  // them follow.
+  const tabs = useMemo(
+    () => TABS.filter(t => t.id !== 'errors' || (shown?.errors.length ?? 0) > 0),
+    [shown]
+  )
+  // Derived rather than corrected in an effect: the selected tab can vanish
+  // under the toggle, and falling back here avoids a frame rendered with no
+  // panel. `tab` itself is left alone, so turning the toggle back on returns
+  // you to where you were.
+  const activeTab = tabs.some(t => t.id === tab) ? tab : 'summary'
+
   const totalCount = shown?.spans.length ?? 0
   const shownServiceCount = useMemo(
     () => (shown ? new Set(shown.spans.map(sp => sp.service)).size : 0),
@@ -714,6 +738,52 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
     if (queryNode && matchList.length === 1) setSelectedId(matchList[0].id)
   }, [queryNode, matchList])
 
+  /**
+   * The trace as a portable document, not as this view holds it.
+   *
+   * `trace` carries a byId index and the log record it was reached from —
+   * view-model shape that would be noise in a file someone attaches to a
+   * ticket. What goes out is the span tree with real attributes, spelled the
+   * way the API spells it.
+   *
+   * Always the whole trace, never the Show Full Trace subset: that toggle is
+   * about what is on screen, and a file that quietly dropped seven services
+   * because of a checkbox would be found out much later than it was set.
+   */
+  const downloadTrace = useCallback(() => {
+    if (!trace) return
+    const doc = {
+      traceId: trace.traceId,
+      startTime: trace.startTime.toISOString(),
+      durationMs: round3(trace.totalMs),
+      services: trace.services,
+      spanCount: trace.spans.length,
+      spans: trace.spans.map(sp => ({
+        spanId: sp.id,
+        parentSpanId: sp.parentId,
+        name: sp.name,
+        service: sp.service,
+        kind: sp.kind,
+        startTime: sp.startTime.toISOString(),
+        startOffsetMs: round3(sp.start),
+        durationMs: round3(sp.duration),
+        status: sp.status,
+        ...(sp.exception ? { exception: sp.exception } : {}),
+        attributes: sp.tags,
+      })),
+    }
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })
+    )
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `trace-${trace.traceId}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }, [trace])
+
   if (!trace) {
     return (
       <>
@@ -733,6 +803,16 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
       <PageBar
         timeRange={timeRange} setTimeRange={setTimeRange}
         showSettings settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
+        actions={
+          <button
+            className="hbtn icon"
+            title="Download this trace as JSON"
+            aria-label="Download this trace as JSON"
+            onClick={downloadTrace}
+          >
+            <Download aria-hidden="true" />
+          </button>
+        }
       >
         <a onClick={goHome}>CubeAPM</a>
         <span className="sep">/</span>
@@ -783,12 +863,15 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
               a control that scrolls out of sight stops answering that the
               moment you start reading the thing it switched to. */}
           <div className="tw-tabs" role="tablist">
-            {TABS.map(({ id, label, Icon }) => (
-              <button key={id} role="tab" aria-selected={tab === id}
-                className={`tw-tab${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
+            {tabs.map(({ id, label, Icon }) => (
+              <button key={id} role="tab" aria-selected={activeTab === id}
+                className={`tw-tab${activeTab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
                 <Icon size={13} strokeWidth={2} aria-hidden="true" />
                 {label}
-                {id === 'errors' && trace.failed && <span className="tw-tab-dot" />}
+                {/* The tab is only here when it has errors, so the dot is no
+                    longer news — it is what makes the tab's presence land.
+                    A missing tab is not something anyone notices. */}
+                {id === 'errors' && <span className="tw-tab-dot" />}
               </button>
             ))}
           </div>
@@ -799,12 +882,12 @@ export default function TraceDetail({ traceId, goHome, goTraces, goLogs, timeRan
               the trace, so it is the reader's call rather than a fixed ratio. */}
           <div className="tw-tables" ref={tablesRef} style={{ height: tablePx }}>
             <div className="tw-tabbody">
-              {tab === 'summary' && <SummaryTab trace={shown} onFocus={focusSpan} />}
-              {tab === 'database' && <DatabaseTab trace={shown} onFocus={focusSpan} />}
-              {tab === 'errors' && (
+              {activeTab === 'summary' && <SummaryTab trace={shown} onFocus={focusSpan} />}
+              {activeTab === 'database' && <DatabaseTab trace={shown} onFocus={focusSpan} />}
+              {activeTab === 'errors' && (
                 <ErrorsTab trace={shown} onFocus={focusSpan} onOpenStack={setStackSpan} />
               )}
-              {tab === 'profiles' && (
+              {activeTab === 'profiles' && (
                 <ProfilesTab span={span} narrow={narrowProfile} setNarrow={setNarrowProfile} />
               )}
             </div>
