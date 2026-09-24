@@ -130,9 +130,10 @@ function WaterfallRow({ span, trace, depth, expandable, expanded, selected, colo
         {!span.exception && span.db && <DbIcon />}
         {status && <span className={`tw-code${Number(status) >= 500 ? ' is-5xx' : Number(status) >= 400 ? ' is-4xx' : ' is-2xx'}`}>{status}</span>}
 
-        {/* The dot repeats the bar's colour where the service is named, so the
-            legend only has to be read once. */}
-        <span className="tw-svc-dot" style={{ background: color }} aria-hidden="true" />
+        {/* No colour chip here: the bar behind this row already carries the
+            service's colour across the full width, so a 7px square repeating
+            it beside the name said the same thing twice. The tables keep
+            theirs — they have no bar to read it off. */}
         <span className="tw-svc">{span.service}</span>
         <span className="tw-name">{span.name} <span className="tw-kind">({span.kind})</span></span>
       </span>

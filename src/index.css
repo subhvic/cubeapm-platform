@@ -4053,12 +4053,17 @@ button.pipe-pill-chip-body:hover { color: var(--brand); }
 .tw-code.is-4xx { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
 .tw-code.is-5xx { color: #fff; background: var(--critical); }
 
-.tw-svc-dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
 /* Qualified past `.tw-table td`, which sets `white-space: normal` so endpoints
    and statements wrap. A service name broken over two lines is not a wrap, it
    is a different name on each line. */
 .tw-table td.tw-svc-cell { white-space: nowrap; }
-.tw-svc-cell .tw-svc-dot { display: inline-block; margin-right: 7px; vertical-align: middle; }
+/* Only the tables carry this now. A waterfall row has the bar behind it to
+   read the service colour off; a table cell has nothing, so the chip is the
+   only thing tying a row to the span it points at. */
+.tw-svc-cell .tw-svc-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 2px;
+  margin-right: 7px; vertical-align: middle;
+}
 .tw-svc {
   flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-secondary);
   white-space: nowrap;
